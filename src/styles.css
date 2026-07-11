@@ -1,0 +1,970 @@
+/* ---------- font (bundled, never system) ---------- */
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/InterVariable.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ---------- theme tokens: every color in the app lives here ---------- */
+:root {
+  --font: "Inter", -apple-system, "Segoe UI", sans-serif;
+  /* editor font/size are set from JS (settings + zoom) */
+  --ed-font: Menlo, Consolas, monospace;
+  --ed-size: 13px;
+}
+
+:root[data-theme="light"] {
+  --bg: #eceef2;
+  --header: #dfe2e9; /* tab strip — a touch darker than content */
+  --panel: #ffffff;
+  --panel-alt: #f3f4f7;
+  --text: #1b1f27;
+  --text-dim: #69707d;
+  --text-faint: #9aa1ad;
+  --border: #dcdfe6;
+  --accent: #4f7cf7;
+  --accent-soft: rgba(79, 124, 247, 0.12);
+  --hover: rgba(15, 23, 42, 0.05);
+  --error-bg: #fdecec;
+  --error-text: #b3261e;
+  --scroll: rgba(15, 23, 42, 0.25);
+  --toast-bg: #1b1f27;
+  --toast-text: #ffffff;
+  --shadow: 0 1px 2px rgba(15, 23, 42, 0.1);
+  --ed-sel: rgba(79, 124, 247, 0.22);
+  --ed-sel-blur: rgba(79, 124, 247, 0.12);
+  --ed-line: rgba(15, 23, 42, 0.04);
+  --ed-ws: rgba(27, 31, 39, 0.35);
+  --ed-match-line: rgba(27, 31, 39, 0.45);
+  --ed-match-sel: rgba(255, 150, 0, 0.45);
+  --ed-mm-overlay: rgba(15, 23, 42, 0.08);
+  --ed-mm-overlay-hover: rgba(15, 23, 42, 0.14);
+  /* syntax (One Light-ish) */
+  --syn-kw: #a626a4;
+  --syn-str: #50a14f;
+  --syn-com: #a0a1a7;
+  --syn-num: #986801;
+  --syn-fn: #4078f2;
+  --syn-type: #c18401;
+  --syn-prop: #e45649;
+  --syn-atom: #0184bc;
+  --syn-op: #526069;
+  --syn-meta: #a0a1a7;
+}
+
+/* Finder-style grays (macOS dark appearance) */
+:root[data-theme="dark"] {
+  --bg: #262e38;
+  --header: #1d232b; /* tab strip — darker so the active tab reads as raised */
+  --panel: #303841; /* Mariana editor background */
+  --panel-alt: #38424e;
+  --text: #d8dee9;
+  --text-dim: #a6acb8;
+  --text-faint: #6e7a8a;
+  --border: #414c59;
+  --accent: #6699cc;
+  --accent-soft: rgba(102, 153, 204, 0.25);
+  --hover: rgba(255, 255, 255, 0.05);
+  --error-bg: #3a2226;
+  --error-text: #ff8f88;
+  --scroll: rgba(216, 222, 233, 0.2);
+  --toast-bg: #d8dee9;
+  --toast-text: #1d232b;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  /* editor (Mariana: slate selection blocks, subtle line highlight) */
+  --ed-sel: rgba(84, 96, 109, 0.6);
+  --ed-sel-blur: rgba(84, 96, 109, 0.35);
+  --ed-line: rgba(84, 96, 109, 0.25);
+  --ed-ws: rgba(216, 222, 233, 0.4);
+  --ed-match-line: rgba(216, 222, 233, 0.5);
+  --ed-match-sel: rgba(249, 174, 88, 0.4);
+  --ed-mm-overlay: rgba(216, 222, 233, 0.09);
+  --ed-mm-overlay-hover: rgba(216, 222, 233, 0.15);
+  /* syntax (Mariana) */
+  --syn-kw: #c695c6;
+  --syn-str: #99c794;
+  --syn-com: #a6acb8;
+  --syn-num: #f9ae58;
+  --syn-fn: #6699cc;
+  --syn-type: #f9ae58;
+  --syn-prop: #ec5f66;
+  --syn-atom: #5fb4b4;
+  --syn-op: #f97b58;
+  --syn-meta: #a6acb8;
+}
+
+/* ---------- base ---------- */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+}
+
+body {
+  font-family: var(--font);
+  font-size: 0.8125rem;
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+svg {
+  display: block;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* ---------- custom scrollbars (never native) ---------- */
+::-webkit-scrollbar {
+  width: 0.5rem;
+  height: 0.5rem;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scroll);
+  border-radius: 0.25rem;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ---------- tab bar ---------- */
+.tabbar {
+  display: flex;
+  align-items: flex-end; /* tabs seat on the bar's baseline */
+  gap: 0.25rem;
+  padding: 0.5rem 0.5rem 0;
+  min-height: 2.375rem;
+  background: var(--header);
+}
+
+/* Native window: the bar is the title bar — inset past the traffic lights. */
+:root.native .tabbar {
+  padding-top: 0.625rem;
+  padding-left: 80px;
+  min-height: 2.75rem;
+}
+
+.tabs,
+.systabs {
+  display: flex;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+/* Padding + equal negative margin gives the active tab's flared feet room to
+   render past the edge tabs without shifting layout or being clipped. */
+.tabs {
+  overflow: hidden;
+  padding: 0 0.5rem;
+  margin: 0 -0.5rem;
+}
+
+.tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.3125rem;
+  padding: 0.375rem 0.4375rem 0.375rem 0.75rem;
+  border-radius: 0.55rem 0.55rem 0 0; /* chrome: round the top only */
+  color: var(--text-dim);
+  cursor: default;
+  min-width: 0;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.tab:hover:not(.active) {
+  background: var(--hover);
+  color: var(--text);
+}
+
+/* Active tab matches the content area it opens into and flares into the bar. */
+.tab.active {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.tab.active::before,
+.tab.active::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  width: 0.55rem;
+  height: 0.55rem;
+  background: var(--bg);
+  pointer-events: none;
+}
+
+.tab.active::before {
+  left: -0.55rem;
+  -webkit-mask: radial-gradient(circle at top left, #0000 0.55rem, #000 calc(0.55rem + 0.5px));
+  mask: radial-gradient(circle at top left, #0000 0.55rem, #000 calc(0.55rem + 0.5px));
+}
+
+.tab.active::after {
+  right: -0.55rem;
+  -webkit-mask: radial-gradient(circle at top right, #0000 0.55rem, #000 calc(0.55rem + 0.5px));
+  mask: radial-gradient(circle at top right, #0000 0.55rem, #000 calc(0.55rem + 0.5px));
+}
+
+.tab.dragging {
+  z-index: 5;
+  background: var(--bg);
+  box-shadow: 0 0.25rem 0.75rem rgba(0, 0, 0, 0.35);
+  cursor: grabbing;
+}
+
+body.tab-dragging,
+body.tab-dragging * {
+  cursor: grabbing !important;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.tabtitle {
+  max-width: var(--tab-title-max, 13.5rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 550;
+}
+
+.tabclose {
+  width: 1rem;
+  height: 1rem;
+  padding: 0.1875rem;
+  border-radius: 0.25rem;
+  opacity: 0;
+  color: var(--text-dim);
+  transition: opacity 0.12s ease, background 0.12s ease;
+}
+
+.tab:hover .tabclose,
+.tab.active .tabclose {
+  opacity: 0.75;
+}
+
+.tabclose:hover {
+  background: var(--hover);
+  opacity: 1;
+}
+
+.tbtn {
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0.375rem;
+  border-radius: 0.4375rem;
+  color: var(--text-dim);
+  transition: background 0.12s ease, color 0.12s ease;
+  flex: none;
+}
+
+.tbtn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.tbtn.on {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.flexspace {
+  flex: 1;
+}
+
+/* ---------- content / tab views ---------- */
+.content {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  padding: 0.5rem;
+}
+
+.tabview {
+  flex: 1;
+  display: none;
+  min-width: 0;
+  min-height: 0;
+}
+
+.tabview.active {
+  display: flex;
+}
+
+/* ---------- editor ---------- */
+.editorview {
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.edhost {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  position: relative;
+}
+
+.edhost .cm-editor {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  background: var(--panel);
+  color: var(--text);
+  font-size: var(--ed-size);
+}
+
+.edhost .cm-editor.cm-focused {
+  outline: none;
+}
+
+.edhost .cm-editor .cm-scroller {
+  font-family: var(--ed-font);
+  line-height: 1.3; /* tight, like Sublime (was 1.55) */
+}
+
+.edhost .cm-editor .cm-content {
+  caret-color: var(--text);
+  user-select: text;
+  -webkit-user-select: text;
+  padding: 0.375rem 0;
+}
+
+.edhost .cm-editor .cm-cursor,
+.edhost .cm-editor .cm-dropCursor {
+  border-left-color: var(--text);
+}
+
+.edhost .cm-editor .cm-gutters {
+  background: var(--panel);
+  color: var(--text-faint);
+  border-right: 1px solid var(--border);
+  font-size: calc(var(--ed-size) * 0.85);
+}
+
+.edhost .cm-editor .cm-lineNumbers .cm-gutterElement {
+  /* Roomy, Sublime-style gutter; em so the breathing scales with editor zoom. */
+  padding: 0 1em 0 1.5em;
+}
+
+.edhost .cm-editor .cm-activeLineGutter {
+  background: transparent;
+  color: var(--text-dim);
+}
+
+.edhost .cm-editor .cm-activeLine {
+  background: var(--ed-line);
+}
+
+.edhost .cm-editor .cm-selectionBackground {
+  position: absolute; /* our own selection layer (drawSelection is not used) */
+  border-radius: 0; /* square blocks (Sublime-style); rounded corners on stacked
+                       line boxes read as separate cards — see markers() */
+  background: var(--ed-sel-blur);
+}
+
+.edhost .cm-editor.cm-focused .cm-selectionBackground {
+  background: var(--ed-sel);
+}
+
+/* WKWebView ignores ::selection rules in adopted stylesheets, so CodeMirror's
+   own "hide the native selection" rule never lands there — the OS selection
+   color paints over the text. Hide it from a real stylesheet instead; the
+   drawSelection layer below the text is the only selection paint we want. */
+.edhost .cm-editor .cm-line::selection,
+.edhost .cm-editor .cm-line ::selection,
+.edhost .cm-editor .cm-content::selection {
+  background-color: transparent !important;
+  color: inherit !important;
+}
+
+.edhost .cm-editor .cm-selectionMatch {
+  background: var(--accent-soft);
+}
+
+.edhost .cm-editor .cm-matchingBracket {
+  background: var(--accent-soft);
+  outline: 1px solid var(--accent);
+  border-radius: 1px;
+}
+
+.edhost .cm-editor .cm-searchMatch {
+  background: transparent;
+  box-shadow: 0 0 0 1px var(--ed-match-line);
+  border-radius: 2px;
+}
+
+.edhost .cm-editor .cm-searchMatch-selected {
+  background: var(--ed-match-sel);
+}
+
+/* ---------- minimap (Sublime-style file preview on the right) ---------- */
+.edhost .cm-editor .cm-minimap-inner {
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+}
+
+.edhost .cm-editor .cm-minimap-overlay {
+  background: var(--ed-mm-overlay);
+  border-radius: 2px;
+}
+
+.edhost .cm-editor .cm-minimap-overlay:hover,
+.edhost .cm-editor .cm-minimap-overlay-active {
+  background: var(--ed-mm-overlay-hover);
+}
+
+.edhost .cm-editor .cm-minimap-box-shadow {
+  box-shadow: none; /* flat, like the rest of the app */
+}
+
+/* ---------- search panel (restyled to match the app) ---------- */
+.edhost .cm-editor .cm-panels {
+  background: var(--panel-alt);
+  color: var(--text);
+  border: none;
+  font-family: var(--font);
+  font-size: 0.8125rem;
+}
+
+.edhost .cm-editor .cm-panels-top {
+  border-bottom: 1px solid var(--border);
+}
+
+.edhost .cm-editor .cm-panel.cm-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 2rem 0.5rem 0.625rem;
+}
+
+.edhost .cm-editor .cm-panel.cm-search br {
+  display: none; /* the stock panel line-breaks; flex handles layout instead */
+}
+
+.edhost .cm-editor .cm-textfield {
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  padding: 0.25rem 0.5rem;
+  outline: none;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.edhost .cm-editor .cm-textfield:focus {
+  border-color: var(--accent);
+}
+
+.edhost .cm-editor .cm-button {
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  background-image: none;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  padding: 0.25rem 0.625rem;
+  transition: background 0.12s ease;
+}
+
+.edhost .cm-editor .cm-button:hover {
+  background: var(--hover);
+}
+
+.edhost .cm-editor .cm-panel.cm-search label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.edhost .cm-editor .cm-panel.cm-search input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
+.edhost .cm-editor .cm-panel.cm-search button[name="close"] {
+  position: absolute;
+  top: 0.375rem;
+  right: 0.375rem;
+  width: 1.375rem;
+  height: 1.375rem;
+  padding: 0;
+  border-radius: 0.25rem;
+  color: var(--text-dim);
+  font-size: 1rem;
+}
+
+.edhost .cm-editor .cm-panel.cm-search button[name="close"]:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+/* Whitespace made visible inside the selection only (Sublime-style). The
+   pseudo-element sits at its static inline position over the real character. */
+.edhost .cm-editor .cm-selSpace::before {
+  content: "\B7";
+  position: absolute;
+  pointer-events: none;
+  color: var(--ed-ws);
+}
+
+.edhost .cm-editor .cm-selTab::before {
+  content: "\2192";
+  position: absolute;
+  pointer-events: none;
+  color: var(--ed-ws);
+}
+
+/* ---------- syntax token colors (classes from editor.ts HighlightStyle) ---------- */
+.tok-kw { color: var(--syn-kw); }
+.tok-str { color: var(--syn-str); }
+.tok-com { color: var(--syn-com); font-style: italic; }
+.tok-num { color: var(--syn-num); }
+.tok-fn { color: var(--syn-fn); }
+.tok-type { color: var(--syn-type); }
+.tok-prop { color: var(--syn-prop); }
+.tok-atom { color: var(--syn-atom); }
+.tok-op { color: var(--syn-op); }
+.tok-meta { color: var(--syn-meta); }
+.tok-regex { color: var(--syn-str); }
+.tok-heading { color: var(--syn-fn); font-weight: 700; }
+.tok-em { font-style: italic; }
+.tok-strong { font-weight: 700; }
+.tok-link { color: var(--accent); text-decoration: underline; }
+
+/* ---------- status bar ---------- */
+.statusbar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.1875rem 0.625rem;
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 0.6875rem;
+  min-height: 1.5rem;
+}
+
+.statusinfo {
+  font-variant-numeric: tabular-nums;
+}
+
+.langbtn {
+  padding: 0.125rem 0.4375rem;
+  border-radius: 0.25rem;
+  color: var(--text-dim);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.langbtn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+/* ---------- custom dropdown (settings + status bar) ---------- */
+.dropwrap {
+  position: relative;
+}
+
+.dropbtn {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.3125rem 0.5rem 0.3125rem 0.625rem;
+  border-radius: 0.4375rem;
+  background: var(--panel-alt);
+  transition: background 0.12s ease;
+}
+
+.dropbtn:hover {
+  background: var(--hover);
+}
+
+.dropbtn svg {
+  width: 0.75rem;
+  height: 0.75rem;
+  color: var(--text-dim);
+  transform: rotate(90deg);
+}
+
+.droplist {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  right: 0;
+  z-index: 30;
+  min-width: 9rem;
+  max-height: 16rem;
+  overflow-y: auto;
+  padding: 0.25rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+}
+
+.droplist.up {
+  top: auto;
+  bottom: calc(100% + 0.25rem);
+  right: 0.375rem;
+}
+
+.dropitem {
+  text-align: left;
+  padding: 0.3125rem 0.5rem;
+  border-radius: 0.375rem;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.dropitem:hover {
+  background: var(--hover);
+}
+
+.dropitem.on {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* ---------- settings tab ---------- */
+.settings {
+  flex: 1;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}
+
+.settings-inner {
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: 2rem 2rem 3rem;
+}
+
+.settings h1 {
+  font-size: 1.25rem;
+  font-weight: 650;
+}
+
+.setsection {
+  margin-top: 1.5rem;
+}
+
+.setsection h2 {
+  font-size: 0.6875rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  margin-bottom: 0.375rem;
+}
+
+.setrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.setrow:last-child {
+  border-bottom: none;
+}
+
+.setname {
+  font-weight: 550;
+}
+
+.sethint {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  margin-top: 0.125rem;
+}
+
+.seg {
+  display: flex;
+  gap: 0.125rem;
+  background: var(--panel-alt);
+  border-radius: 0.4375rem;
+  padding: 0.1875rem;
+}
+
+.seg button {
+  padding: 0.25rem 0.75rem;
+  border-radius: 0.3125rem;
+  color: var(--text-dim);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.seg button:hover {
+  color: var(--text);
+}
+
+.seg button.on {
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+
+.switch {
+  width: 2.375rem;
+  height: 1.375rem;
+  border-radius: 999px;
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  position: relative;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  flex: none;
+}
+
+.switch .knob {
+  position: absolute;
+  top: 0.125rem;
+  left: 0.125rem;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.switch.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.switch.on .knob {
+  transform: translateX(1rem);
+  background: #ffffff;
+}
+
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.stepbtn {
+  width: 1.625rem;
+  height: 1.625rem;
+  padding: 0.375rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.375rem;
+  background: var(--panel-alt);
+  color: var(--text-dim);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.stepbtn:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.stepval {
+  min-width: 3rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-weight: 550;
+}
+
+.textinput {
+  font: inherit;
+  color: var(--text);
+  background: var(--panel-alt);
+  border: 1px solid transparent;
+  border-radius: 0.375rem;
+  padding: 0.3125rem 0.5rem;
+  outline: none;
+  width: 13rem;
+  user-select: text;
+  -webkit-user-select: text;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.textinput:focus {
+  border-color: var(--accent);
+  background: var(--panel);
+}
+
+/* A settings row that navigates elsewhere (e.g. → Shortcuts tab). */
+.linkbtn {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.5rem 0.375rem 0.625rem;
+  border-radius: 0.4375rem;
+  background: var(--panel-alt);
+  color: var(--text);
+  transition: background 0.12s ease;
+}
+
+.linkbtn:hover {
+  background: var(--hover);
+}
+
+.linkbtn svg {
+  width: 0.9375rem;
+  height: 0.9375rem;
+  flex: none;
+  color: var(--text-dim);
+}
+
+.linkbtn svg:last-child {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+/* ---------- shortcuts (keybindings) tab ---------- */
+.kbhead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.kbreset {
+  flex: none;
+  padding: 0.3125rem 0.625rem;
+  border-radius: 0.375rem;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  background: var(--panel-alt);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.kbreset:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.kbrow {
+  gap: 1.5rem;
+}
+
+.kbcombos {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.kbchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.125rem;
+  padding: 0.1875rem 0.1875rem 0.1875rem 0.5rem;
+  border-radius: 0.375rem;
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+}
+
+.kbchip-key {
+  font-size: 0.8125rem;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.kbchip-x {
+  width: 1.125rem;
+  height: 1.125rem;
+  padding: 0.25rem;
+  flex: none;
+  border-radius: 0.25rem;
+  color: var(--text-faint);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.kbchip-x:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.kbadd {
+  min-width: 1.75rem;
+  height: 1.75rem;
+  padding: 0 0.5rem;
+  border-radius: 0.375rem;
+  font-size: 0.9375rem;
+  color: var(--text-dim);
+  background: var(--panel-alt);
+  border: 1px dashed var(--border);
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.kbadd:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.kbadd.recording {
+  color: var(--accent);
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  font-size: 0.75rem;
+  font-weight: 550;
+}
+
+/* ---------- toast ---------- */
+.toast {
+  position: fixed;
+  bottom: 1.5rem;
+  left: 50%;
+  transform: translate(-50%, 0.5rem);
+  background: var(--toast-bg);
+  color: var(--toast-text);
+  padding: 0.375rem 0.875rem;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 550;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  z-index: 10;
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}

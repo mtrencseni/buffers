@@ -1,0 +1,28 @@
+// All iconography is inline SVG on currentColor — crisp at any zoom level.
+const svg = (body: string, stroke = true) =>
+  `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" ${
+    stroke
+      ? 'fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"'
+      : 'fill="currentColor"'
+  }>${body}</svg>`;
+
+export const icons = {
+  plus: svg('<path d="M8 3.5v9M3.5 8h9"/>'),
+  close: svg('<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>'),
+  chevron: svg('<path d="m6 3.75 4.25 4.25L6 12.25" stroke-width="1.6"/>'),
+  // A true cog silhouette (24-unit viewBox) so it reads as a gear, not a sun.
+  gear:
+    '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>',
+  sun: svg(
+    '<circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.6M8 12.9v1.6M14.5 8h-1.6M3.1 8H1.5M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1M12.6 12.6l-1.1-1.1M4.5 4.5 3.4 3.4"/>'
+  ),
+  moon: svg('<path d="M13.4 9.5A5.5 5.5 0 0 1 6.5 2.6a5.5 5.5 0 1 0 6.9 6.9Z"/>'),
+  code: svg('<path d="m5.5 5.5-3 2.5 3 2.5"/><path d="m10.5 5.5 3 2.5-3 2.5"/><path d="M9.2 3.6 6.8 12.4"/>'),
+  keyboard: svg(
+    '<rect x="1.75" y="4" width="12.5" height="8" rx="1.4"/><path d="M4 6.4h0M6.2 6.4h0M8.4 6.4h0M10.6 6.4h0M4 8.6h0M12 6.4h0M5.5 9.9h5" stroke-width="1.6"/>'
+  ),
+  // Import: arrow into a tray. Export: arrow out of a tray.
+  importFile: svg('<path d="M8 2.5v7M5 6.7 8 9.7l3-3"/><path d="M2.5 10.5v2c0 .55.45 1 1 1h9c.55 0 1-.45 1-1v-2"/>'),
+  exportFile: svg('<path d="M8 9.5v-7M5 5.3 8 2.3l3 3"/><path d="M2.5 10.5v2c0 .55.45 1 1 1h9c.55 0 1-.45 1-1v-2"/>'),
+  search: svg('<circle cx="7" cy="7" r="4.25"/><path d="m10.5 10.5 3 3"/>'),
+};

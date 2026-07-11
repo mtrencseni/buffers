@@ -1,0 +1,28 @@
+[package]
+name = "buffers"
+version = "0.1.0"
+description = "Buffers — a minimalist scratch-buffer editor"
+authors = ["Marton Trencseni"]
+edition = "2021"
+
+[lib]
+name = "buffers_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# `devtools` keeps the WKWebView Web Inspector available in release builds
+# (gated at runtime by the "Enable developer tools" setting).
+tauri = { version = "2", features = ["devtools"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri-plugin-dialog = "2"
+tauri-plugin-window-state = "2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+
+[profile.release]
+strip = true
