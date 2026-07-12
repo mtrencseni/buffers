@@ -36,6 +36,10 @@ export interface Settings {
   activeLine: boolean;
   /** Show tab names in all lowercase. */
   lowercaseTabs: boolean;
+  /** Tabs across the top (default) or down a resizable left sidebar. */
+  tabsSide: "top" | "left";
+  /** Width (px) of the left tab sidebar when tabsSide === "left". */
+  sidebarWidth: number;
   /** Language assumed for brand-new buffers. */
   defaultLanguage: LangId;
   /** Enable the Web Inspector (⌥⌘I). */

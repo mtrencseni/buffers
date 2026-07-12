@@ -304,6 +304,110 @@ body.tab-dragging * {
   flex: 1;
 }
 
+/* ---------- left sidebar tabs (Settings → Tab bar = Left) ---------- */
+.sidebar {
+  display: none; /* only shown in left mode */
+}
+
+#app.tabs-left {
+  flex-direction: row;
+}
+
+.tabs-left .tabbar {
+  display: none;
+}
+
+.tabs-left .sidebar {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  min-height: 0;
+  background: var(--header);
+  border-right: 1px solid var(--border);
+}
+
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  padding: 0.375rem;
+  min-height: 2rem;
+  flex: none;
+}
+
+/* Native window: clear the traffic lights that float over the top-left. */
+:root.native .tabs-left .sidebar-head {
+  padding-top: 0.625rem;
+  padding-left: 80px;
+  min-height: 2.5rem;
+}
+
+/* Buffer tab rows fill the middle and scroll; system tabs + controls sit below. */
+.tabs-left .tabs {
+  flex: 1;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.125rem;
+  padding: 0.25rem;
+  margin: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+}
+
+.tabs-left .systabs {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.125rem;
+  padding: 0.25rem;
+  flex: none;
+}
+
+.sidebar-controls {
+  display: flex;
+  gap: 0.125rem;
+  padding: 0.25rem 0.375rem;
+  flex: none;
+  border-top: 1px solid var(--border);
+}
+
+/* Rows read as list items, not chrome tabs: full-width, simple rounded rect. */
+.tabs-left .tab {
+  border-radius: 0.4375rem;
+  padding: 0.375rem 0.4375rem 0.375rem 0.625rem;
+}
+
+.tabs-left .tab::before,
+.tabs-left .tab::after {
+  display: none; /* no flared chrome feet in the sidebar */
+}
+
+.tabs-left .tab.active {
+  background: var(--bg);
+}
+
+.tabs-left .tabtitle {
+  flex: 1;
+  max-width: none;
+}
+
+/* Drag handle on the sidebar's right edge. */
+.sidebar-resize {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 6;
+}
+
+.sidebar-resize:hover {
+  background: linear-gradient(to right, transparent 2px, var(--accent) 2px, var(--accent) 4px, transparent 4px);
+}
+
 /* ---------- content / tab views ---------- */
 .content {
   flex: 1;
@@ -357,6 +461,10 @@ body.tab-dragging * {
   /* Absolute px (set in main.ts applyFont) so content and the smaller-font gutter
      share one line box — a unitless value drifted the gutter numbers. */
   line-height: var(--ed-line-height, 17px);
+  /* Kill the macOS rubber-band overscroll at the top/bottom: the elastic bounce
+     briefly summoned the native scrollbar, which reserved width for an instant
+     and reflowed the wrapped text. No bounce → no flash → no reflow. */
+  overscroll-behavior-y: none;
 }
 
 /* Hide the native vertical scrollbar: it used to reserve ~8px to the RIGHT of the
@@ -393,9 +501,13 @@ body.tab-dragging * {
   caret-color: var(--text);
   user-select: text;
   -webkit-user-select: text;
-  /* Left pad gives the text breathing room off the gutter separator line
-     (Sublime leaves a small gap there rather than hugging the rule). */
-  padding: 0.375rem 0 0.375rem 0.6rem;
+  padding: 0.375rem 0;
+  /* Gap off the gutter separator via MARGIN, not padding: the custom selection
+     layer's forRange anchors wrapped continuation rows to the content-box left,
+     while the first row anchors to the glyph position. With padding those differ
+     (continuation rows jut left); with margin the content box starts at the text,
+     so every row shares one left edge. */
+  margin-left: 0.6rem;
 }
 
 .edhost .cm-editor .cm-cursor,

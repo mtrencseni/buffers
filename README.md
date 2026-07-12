@@ -25,11 +25,14 @@ Buffers are the point: text that lives in tabs, not files. Nothing is ever
   C++, C#, Java, Kotlin, Rust, SQL, Bash, HTML, CSS, LaTeX, YAML, XML, plain),
   auto-detected on import and switchable from the status bar.
 - **Editor essentials:** line numbers, **find & replace (⌘F / ⌘⌥F)**, a
-  **minimap** you can click to scroll, soft line-wrap, and adjustable text size
-  (**⌘+ / ⌘− / ⌘0**).
+  **minimap** with a Sublime-style overlay scrollbar (it floats over the minimap
+  and auto-hides), soft line-wrap, optional active-line highlight, and adjustable
+  text size (**⌘+ / ⌘− / ⌘0**).
+- **Tabs your way:** across the **top** (default) or down a **resizable left
+  sidebar** — either way, drag to reorder. Switch in Settings.
 - **Polished:** light / dark (Sublime "Mariana") themes, fully **configurable
-  keyboard shortcuts**, drag-to-reorder tabs, remembers its window size, opens
-  at 80% of the screen the first time.
+  keyboard shortcuts**, remembers its window size, opens at 80% of the screen the
+  first time.
 
 ## Install & run
 

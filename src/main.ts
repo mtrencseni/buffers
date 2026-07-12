@@ -1,6 +1,6 @@
 import "./styles.css";
 import { invoke, isTauri, onEvent } from "./ipc";
-import { FONT_MAX, FONT_MIN, persist, state } from "./state";
+import { FONT_MAX, FONT_MIN, SIDEBAR_MAX, SIDEBAR_MIN, persist, state } from "./state";
 import type { LangId, Theme } from "./types";
 import { Editor } from "./editor";
 import { initKeyboard } from "./keyboard";
@@ -28,6 +28,13 @@ class App {
   contentEl = el("div", "content");
   themeBtn = el("button", "tbtn");
   devBtn = el("button", "tbtn");
+  newBtn = el("button", "tbtn");
+  gearBtn = el("button", "tbtn");
+  // Top-tabs container and the left-sidebar container; only one is populated at a
+  // time (see applyTabsLayout). The sidebar has a resize handle on its right edge.
+  tabbar = el("div", "tabbar");
+  sidebar = el("div", "sidebar");
+  sidebarResize = el("div", "sidebar-resize");
 
   editorWrap = el("div", "tabview editorview");
   editorHost = el("div", "edhost");
@@ -136,6 +143,9 @@ class App {
       if (typeof s.wrapLines === "boolean") state.settings.wrapLines = s.wrapLines;
       if (typeof s.minimap === "boolean") state.settings.minimap = s.minimap;
       if (typeof s.lowercaseTabs === "boolean") state.settings.lowercaseTabs = s.lowercaseTabs;
+      if (s.tabsSide === "left" || s.tabsSide === "top") state.settings.tabsSide = s.tabsSide;
+      if (typeof s.sidebarWidth === "number")
+        state.settings.sidebarWidth = clamp(s.sidebarWidth, SIDEBAR_MIN, SIDEBAR_MAX);
       if (isLangId(s.defaultLanguage)) state.settings.defaultLanguage = s.defaultLanguage;
       if (typeof s.devTools === "boolean") state.settings.devTools = s.devTools;
     }
@@ -150,13 +160,10 @@ class App {
   private buildShell(): void {
     const root = document.getElementById("app")!;
     if (isTauri) document.documentElement.classList.add("native");
-    const tabbar = el("div", "tabbar");
-    tabbar.setAttribute("data-tauri-drag-region", "");
 
-    const newBtn = el("button", "tbtn");
-    newBtn.innerHTML = icons.plus;
-    newBtn.title = "New buffer (⌘T)";
-    newBtn.addEventListener("click", () => this.commandHandlers.newTab());
+    this.newBtn.innerHTML = icons.plus;
+    this.newBtn.title = "New buffer (⌘T)";
+    this.newBtn.addEventListener("click", () => this.commandHandlers.newTab());
 
     this.themeBtn.addEventListener("click", () => this.toggleTheme());
     onThemeChange(() => this.syncThemeBtn());
@@ -165,14 +172,11 @@ class App {
     this.devBtn.title = "Developer tools (⌥⌘I)";
     this.devBtn.addEventListener("click", () => void invoke("toggle_devtools").catch(() => {}));
 
-    const gearBtn = el("button", "tbtn");
-    gearBtn.innerHTML = icons.gear;
-    gearBtn.title = "Settings (⌘,)";
-    gearBtn.addEventListener("click", () => this.openSys("settings"));
+    this.gearBtn.innerHTML = icons.gear;
+    this.gearBtn.title = "Settings (⌘,)";
+    this.gearBtn.addEventListener("click", () => this.openSys("settings"));
 
-    const spacer = el("div", "flexspace");
-    spacer.setAttribute("data-tauri-drag-region", "");
-    tabbar.append(this.tabsEl, newBtn, spacer, this.sysTabsEl, this.themeBtn, this.devBtn, gearBtn);
+    this.sidebarResize.addEventListener("mousedown", (e) => this.beginSidebarResize(e));
 
     // Editor view: the CodeMirror host + a status bar underneath.
     const statusBar = el("div", "statusbar");
@@ -185,11 +189,67 @@ class App {
     this.editorWrap.classList.add("active");
     this.contentEl.append(this.editorWrap);
 
-    root.append(tabbar, this.contentEl);
+    root.append(this.tabbar, this.sidebar, this.contentEl);
+    this.applyTabsLayout();
     this.syncThemeBtn();
     this.syncDevBtn();
-    new ResizeObserver(() => this.fitTabTitles()).observe(tabbar);
+    new ResizeObserver(() => this.fitTabTitles()).observe(this.tabbar);
     window.addEventListener("resize", () => this.fitTabTitles());
+  }
+
+  /** Place the shared tab pieces into the top bar or the left sidebar, per the
+      tabsSide setting. Called at startup and whenever the setting changes. */
+  applyTabsLayout(): void {
+    const left = state.settings.tabsSide === "left";
+    document.getElementById("app")!.classList.toggle("tabs-left", left);
+    if (left) {
+      const head = el("div", "sidebar-head");
+      head.setAttribute("data-tauri-drag-region", "");
+      head.append(this.newBtn);
+      const controls = el("div", "sidebar-controls");
+      controls.append(this.themeBtn, this.devBtn, this.gearBtn);
+      this.sidebar.replaceChildren(head, this.tabsEl, this.sysTabsEl, controls, this.sidebarResize);
+      this.sidebar.style.width = `${state.settings.sidebarWidth}px`;
+      this.tabbar.replaceChildren();
+    } else {
+      const spacer = el("div", "flexspace");
+      spacer.setAttribute("data-tauri-drag-region", "");
+      this.tabbar.setAttribute("data-tauri-drag-region", "");
+      this.tabbar.append(
+        this.tabsEl,
+        this.newBtn,
+        spacer,
+        this.sysTabsEl,
+        this.themeBtn,
+        this.devBtn,
+        this.gearBtn
+      );
+      this.sidebar.replaceChildren();
+      this.sidebar.style.width = "";
+    }
+    // buildShell() runs this before the editor exists; init() renders the strip
+    // itself afterwards. Only re-render here for runtime setting changes.
+    if (this.editor) this.renderTabstrip();
+  }
+
+  private beginSidebarResize(e: MouseEvent): void {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = this.sidebar.getBoundingClientRect().width;
+    document.body.classList.add("col-resizing");
+    const move = (ev: MouseEvent) => {
+      const w = clamp(startW + (ev.clientX - startX), SIDEBAR_MIN, SIDEBAR_MAX);
+      state.settings.sidebarWidth = Math.round(w);
+      this.sidebar.style.width = `${state.settings.sidebarWidth}px`;
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      document.body.classList.remove("col-resizing");
+      persist();
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
   }
 
   private applyFont(): void {
@@ -332,15 +392,12 @@ class App {
   }
 
   cycleTab(d: 1 | -1): void {
-    // Cycle order: buffer tabs, then any open system tabs.
-    const kinds: (number | SysTab)[] = [...this.editor.ids()];
-    if (this.settingsView) kinds.push("settings");
-    if (this.kbView) kinds.push("keybindings");
-    const cur = this.activeSys ?? this.editor.active();
-    const i = kinds.findIndex((k) => k === cur);
-    const next = kinds[(i + d + kinds.length) % kinds.length];
-    if (typeof next === "number") this.activateBuffer(next);
-    else this.openSys(next);
+    // Cycle only through buffer tabs — skip the Settings / Shortcuts system tabs.
+    // From a system tab this advances from the last-active buffer, leaving it.
+    const ids = this.editor.ids();
+    if (ids.length === 0) return;
+    const i = Math.max(0, ids.indexOf(this.editor.active()));
+    this.activateBuffer(ids[(i + d + ids.length) % ids.length]);
   }
 
   private showView(): void {
@@ -410,6 +467,11 @@ class App {
       onLowercaseTabs: (v) => {
         state.settings.lowercaseTabs = v;
         this.syncTitles();
+        persist();
+      },
+      onTabsSide: (side) => {
+        state.settings.tabsSide = side;
+        this.applyTabsLayout();
         persist();
       },
       onDefaultLanguage: (l) => {
@@ -505,19 +567,25 @@ class App {
 
   private beginTabDrag(startEvent: MouseEvent, tabEl: HTMLElement): void {
     const container = this.tabsEl;
-    const pointerStart = startEvent.clientX;
-    const homeLeft = tabEl.offsetLeft;
+    // Top tabs reorder along X; sidebar tab rows reorder along Y.
+    const vert = state.settings.tabsSide === "left";
+    const axis = vert ? "Y" : "X";
+    const pointerStart = vert ? startEvent.clientY : startEvent.clientX;
+    const home = vert ? tabEl.offsetTop : tabEl.offsetLeft;
+    const extent = (s: HTMLElement) => (vert ? s.offsetTop : s.offsetLeft);
+    const size = (s: HTMLElement) => (vert ? s.offsetHeight : s.offsetWidth);
+    const edge = (r: DOMRect) => (vert ? r.top : r.left);
     let dragging = false;
 
     const flip = (mutate: () => void) => {
       const sibs = [...container.querySelectorAll<HTMLElement>(".tab")].filter((s) => s !== tabEl);
-      const before = new Map(sibs.map((s) => [s, s.getBoundingClientRect().left]));
+      const before = new Map(sibs.map((s) => [s, edge(s.getBoundingClientRect())]));
       mutate();
       for (const s of sibs) {
-        const dx = (before.get(s) ?? 0) - s.getBoundingClientRect().left;
-        if (!dx) continue;
+        const d = (before.get(s) ?? 0) - edge(s.getBoundingClientRect());
+        if (!d) continue;
         s.style.transition = "none";
-        s.style.transform = `translateX(${dx}px)`;
+        s.style.transform = `translate${axis}(${d}px)`;
         requestAnimationFrame(() => {
           s.style.transition = "transform 0.15s ease";
           s.style.transform = "";
@@ -526,18 +594,18 @@ class App {
     };
 
     const onMove = (e: MouseEvent) => {
-      const raw = e.clientX - pointerStart;
+      const raw = (vert ? e.clientY : e.clientX) - pointerStart;
       if (!dragging) {
         if (Math.abs(raw) < 4) return;
         dragging = true;
         tabEl.classList.add("dragging");
         document.body.classList.add("tab-dragging");
       }
-      tabEl.style.transform = `translateX(${raw - (tabEl.offsetLeft - homeLeft)}px)`;
-      const visualCenter = homeLeft + raw + tabEl.offsetWidth / 2;
+      tabEl.style.transform = `translate${axis}(${raw - (extent(tabEl) - home)}px)`;
+      const visualCenter = home + raw + size(tabEl) / 2;
       const sibs = [...container.querySelectorAll<HTMLElement>(".tab")].filter((s) => s !== tabEl);
       let target = 0;
-      for (const s of sibs) if (visualCenter > s.offsetLeft + s.offsetWidth / 2) target++;
+      for (const s of sibs) if (visualCenter > extent(s) + size(s) / 2) target++;
       const curIdx = [...container.querySelectorAll(".tab")].indexOf(tabEl);
       if (target !== curIdx) flip(() => container.insertBefore(tabEl, sibs[target] ?? null));
     };

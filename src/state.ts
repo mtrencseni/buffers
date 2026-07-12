@@ -3,6 +3,8 @@ import type { Settings } from "./types";
 
 export const FONT_MIN = 9;
 export const FONT_MAX = 32;
+export const SIDEBAR_MIN = 140;
+export const SIDEBAR_MAX = 420;
 
 export const state = {
   settings: {
@@ -13,6 +15,8 @@ export const state = {
     minimap: true,
     activeLine: false,
     lowercaseTabs: false,
+    tabsSide: "top",
+    sidebarWidth: 200,
     defaultLanguage: "plain",
     devTools: false,
   } as Settings,

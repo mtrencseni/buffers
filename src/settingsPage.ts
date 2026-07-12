@@ -12,6 +12,7 @@ export interface SettingsHooks {
   onMinimap(v: boolean): void;
   onActiveLine(v: boolean): void;
   onLowercaseTabs(v: boolean): void;
+  onTabsSide(side: "top" | "left"): void;
   onDefaultLanguage(l: LangId): void;
   onDevTools(v: boolean): void;
   onOpenKeybindings(): void;
@@ -78,6 +79,22 @@ export function buildSettingsPage(hooks: SettingsHooks): SettingsPage {
     });
     return s;
   };
+  // Tab position segmented control (top bar vs left sidebar).
+  const tabSeg = el("div", "seg");
+  const tabSideBtns = new Map<"top" | "left", HTMLButtonElement>();
+  for (const [side, label] of [
+    ["top", "Top"],
+    ["left", "Left"],
+  ] as ["top" | "left", string][]) {
+    const b = el("button", "", label);
+    b.addEventListener("click", () => {
+      hooks.onTabsSide(side);
+      sync();
+    });
+    tabSideBtns.set(side, b);
+    tabSeg.append(b);
+  }
+
   const wrapSw = makeSwitch(() => hooks.get().wrapLines, hooks.onWrapLines);
   const minimapSw = makeSwitch(() => hooks.get().minimap, hooks.onMinimap);
   const activeLineSw = makeSwitch(() => hooks.get().activeLine, hooks.onActiveLine);
@@ -170,7 +187,8 @@ export function buildSettingsPage(hooks: SettingsHooks): SettingsPage {
     row("Minimap", "Tiny preview of the whole buffer on the right — click it to scroll", minimapSw),
     row("Highlight active line", "Shade the line the cursor is on", activeLineSw),
     row("Default language", "Syntax assumed for new buffers", langWrap),
-    row("Lowercase tab titles", "Show buffer titles in all lowercase", lowerSw)
+    row("Lowercase tab titles", "Show buffer titles in all lowercase", lowerSw),
+    row("Tab bar", "Tabs across the top, or down a resizable left sidebar", tabSeg)
   );
 
   section(
@@ -191,6 +209,7 @@ export function buildSettingsPage(hooks: SettingsHooks): SettingsPage {
   function sync(): void {
     const s = hooks.get();
     for (const [t, b] of themeBtns) b.classList.toggle("on", s.theme === t);
+    for (const [side, b] of tabSideBtns) b.classList.toggle("on", s.tabsSide === side);
     setSwitch(wrapSw, s.wrapLines);
     setSwitch(minimapSw, s.minimap);
     setSwitch(activeLineSw, s.activeLine);
