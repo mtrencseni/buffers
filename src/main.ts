@@ -196,6 +196,14 @@ class App {
     const rootStyle = document.documentElement.style;
     rootStyle.setProperty("--ed-font", `${state.settings.fontFamily}, Menlo, Consolas, monospace`);
     rootStyle.setProperty("--ed-size", `${state.zoomSize}px`);
+    // ABSOLUTE (px) line height, shared by content and gutter. A unitless 1.3
+    // resolves against each element's own font-size, so the smaller-font gutter
+    // got a shorter line box than the content and its numbers drifted fractionally
+    // over long wrapped lines. Integer px locks them together.
+    rootStyle.setProperty("--ed-line-height", `${Math.round(state.zoomSize * 1.3)}px`);
+    // Route the change through CM as a theme reconfigure so it re-reads styles
+    // and re-measures line heights (requestMeasure alone isn't a reliable trigger).
+    this.editor?.applyFontConfig();
   }
 
   // ---- tabs ------------------------------------------------------------------
@@ -218,6 +226,9 @@ class App {
       t.append(title, close);
       t.addEventListener("mousedown", (e) => {
         if (e.button !== 0 || (e.target as HTMLElement).closest(".tabclose")) return;
+        // Default mousedown moves focus out of the editor AFTER activate()
+        // focused it (divs aren't focusable → body), killing keyboard input.
+        e.preventDefault();
         this.activateBuffer(id);
         this.beginTabDrag(e, t);
       });

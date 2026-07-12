@@ -68,7 +68,7 @@ exit — runs and is testable in a browser. `isTauri` gates native-only calls.
 
 - **Buffer model:** `Editor.bufs: Map<id, {id, language, state: EditorState, scrollTop}>` + `order: number[]` + `activeId`. `activate(id)` **always** stashes the live view state first (see gotcha), then `view.setState(buf.state)`.
 - **Hot-exit persistence** (`editor.ts`): `schedule()` marks dirty and sets a **1 s idle** timer plus a **10 s max-interval** backstop. `flush()` writes the whole session (`save_buffers`) — triggered immediately on window **blur**, `visibilitychange` hidden, tab new/close/switch/reorder, `pagehide`. `restore(session)` rebuilds buffers (ids reassigned; tracks which was active). Closed buffers go on a **≤10** reopen stack (persisted). Undo history is intentionally *not* persisted (CM history isn't cleanly serializable).
-- **Custom selection layer** (`sublimeSelection`, `editor.ts`): draws Sublime-style hug + newline-nub selection with `RectangleMarker`s in a `layer()` below the text. Each row is grown to the full `defaultLineHeight`, **centered on its glyph box**, so consecutive lines tile with no gap. (See gotchas for *why* it's hand-rolled and why it does **not** use `lineBlockAt()`.) Plus `PAD` px horizontal breathing room.
+- **Custom selection layer** (`sublimeSelection`, `editor.ts`): draws Sublime-style hug + newline-nub selection with `RectangleMarker`s in a `layer()` below the text. Rows are grouped into visual-row bands and tiled **self-calibratingly**: the shared edge between adjacent rows is the rounded midpoint of their glyph-box centers, so boxes can't gap or overlap and no line-height metric is trusted for geometry (see gotchas — every metric-based variant broke). Plus `PAD` px horizontal breathing room.
 - **Selection whitespace** (`selectionWhitespace` ViewPlugin): renders `·` for spaces and `→` for tabs, **only inside the selection** (Sublime `draw_white_space: selection`), clipped to the viewport.
 - **Keybindings:** every shortcut is a `Command` in `commands.ts`; `main.ts` builds a combo→id map and dispatches. To add one: extend `CommandId` + `COMMANDS`, add a handler in `main.ts`'s `commandHandlers` (and a `menu.rs` item if it belongs in the menu).
 - **Live settings:** language / wrap / minimap are CM **compartments** reconfigured across every buffer state when the setting changes (`applyWrap`, `applyMinimap`, `setLanguage`); font family/size are CSS vars (`--ed-font`, `--ed-size`).
@@ -93,9 +93,16 @@ exit — runs and is testable in a browser. `isTauri` gates native-only calls.
   also why `drawSelection` is replaced entirely.)
 - **`lineBlockAt().top` is NOT in the selection layer's coordinate space** — it's
   offset (~4 px) and reports a different height. Selection rects must be derived
-  from `RectangleMarker.forRange` output (correct space) and grown to
-  `view.defaultLineHeight`, not from `lineBlockAt`. Getting this wrong makes the
-  highlight sit too high / wrong height.
+  from `RectangleMarker.forRange` output (correct space), not from `lineBlockAt`.
+- **CM's cached metrics (defaultLineHeight, height map) go stale when the editor
+  font changes via a CSS var — and `requestMeasure()` does NOT reliably refresh
+  them.** Symptoms: gutter numbers drift off their rows after ⌘+/⌘−, selection
+  boxes land on the wrong pitch. The fix is twofold: font size/family are ALSO a
+  CM theme in a compartment (`fontComp`/`fontTheme()` in editor.ts) and every
+  font change goes through `applyFontConfig()` — a theme reconfigure is the only
+  trigger that makes CM re-read styles and re-measure; and the selection layer
+  derives ALL geometry from measured row rects (band midpoints), never from a
+  line-height metric. Don't "simplify" either half back.
 - **Throttled paint in the preview:** in a backgrounded preview tab, CM's
   `layer`/minimap only compute markers on a measure/rAF cycle, so the DOM often
   shows **0** selection/minimap elements until a paint is forced (take a
@@ -108,6 +115,22 @@ exit — runs and is testable in a browser. `isTauri` gates native-only calls.
   active tab, or after a compartment reconfigure). Skipping it reverts the buffer
   to a stale stored state and **loses edits**. (Fixed; don't reintroduce the
   `if (activeId !== id)` guard.)
+- **Cursor stuck as arrow after Cmd-Tab (macOS):** a **known wry/WKWebView bug**
+  ([wry#175](https://github.com/tauri-apps/wry/issues/175),
+  [tauri#1526](https://github.com/tauri-apps/tauri/issues/1526)) — WKWebView
+  doesn't re-hit-test the cursor on window activation, worst when alternating
+  between two *co-located* windows (no mouseEntered → tracking area dormant). The
+  only thing that refreshes WebKit's hover state is a **real re-layout** (the
+  manual workarounds are "resize the window" or "toggle devtools"). So the fix
+  (`nudge_relayout` in `lib.rs`, on `WindowEvent::Focused(true)`) automates that:
+  a few 1px window-size round-trips over the activation window. This re-arms
+  tracking (hover works again) and usually recomputes the stationary cursor.
+  **Dead ends — do NOT re-add** (all tried across ~15 rounds, all removed):
+  `setCursorIcon`, `[NSCursor set]`, CGEvents, posted `NSEvent` mouse-moved /
+  mouseEntered, CGWarp, `setAcceptsMouseMovedEvents`, or touching
+  `documentElement.style.cursor`. Every synthetic event makes WebKit re-hit-test
+  from its *stale* hover state and stomp the cursor back to the arrow. Only a real
+  re-layout works.
 - **Icon:** `app-icon.png` is a 1024 canvas, 824×824 artwork at (100,100), with a
   **macOS-standard ~185 px corner radius applied by us** (the flaticon source is
   too square). Regenerate the set with `pnpm tauri icon app-icon.png`.

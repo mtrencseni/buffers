@@ -98,10 +98,139 @@ const selectionWhitespace = ViewPlugin.fromClass(
   { decorations: (v) => v.decorations }
 );
 
+// Sublime-style overlay scrollbar: a thin thumb drawn OVER the minimap (right
+// edge) that only appears while scrolling or hovering the minimap, then fades
+// out. The native scroller scrollbar is hidden (styles.css) so nothing reserves
+// width — that stops the text reflowing when content grows past one screen.
+const overlayScrollbar = ViewPlugin.fromClass(
+  class {
+    private thumb: HTMLDivElement;
+    private scroller: HTMLElement;
+    private host: HTMLElement;
+    private hideTimer = 0;
+    private dragging = false;
+    private dragStartY = 0;
+    private dragStartTop = 0;
+
+    constructor(view: EditorView) {
+      this.scroller = view.scrollDOM;
+      // .cm-editor is position:relative and does not scroll — anchor the thumb
+      // there so it stays put while the content scrolls underneath.
+      this.host = this.scroller.parentElement ?? this.scroller;
+      this.thumb = document.createElement("div");
+      this.thumb.className = "cm-vscroll";
+      this.host.appendChild(this.thumb);
+
+      this.onScroll = this.onScroll.bind(this);
+      this.onHover = this.onHover.bind(this);
+      this.onDown = this.onDown.bind(this);
+      this.onMove = this.onMove.bind(this);
+      this.onUp = this.onUp.bind(this);
+
+      this.scroller.addEventListener("scroll", this.onScroll, { passive: true });
+      this.scroller.addEventListener("mousemove", this.onHover, { passive: true });
+      this.thumb.addEventListener("pointerdown", this.onDown);
+      this.thumb.addEventListener("pointerenter", () => this.show());
+      this.thumb.addEventListener("pointerleave", () => this.scheduleHide());
+      this.layout();
+    }
+
+    update(u: ViewUpdate) {
+      if (u.geometryChanged || u.viewportChanged || u.docChanged) this.layout();
+    }
+
+    /** Size + place the thumb from the current scroll metrics. */
+    private layout() {
+      const { scrollHeight, clientHeight, scrollTop } = this.scroller;
+      const overflow = scrollHeight - clientHeight;
+      if (overflow <= 1) {
+        this.thumb.style.display = "none";
+        return;
+      }
+      this.thumb.style.display = "";
+      const track = clientHeight;
+      const h = Math.max(28, (clientHeight / scrollHeight) * track);
+      const top = (scrollTop / overflow) * (track - h);
+      this.thumb.style.height = `${Math.round(h)}px`;
+      this.thumb.style.transform = `translateY(${Math.round(top)}px)`;
+    }
+
+    private show() {
+      window.clearTimeout(this.hideTimer);
+      this.thumb.classList.add("is-visible");
+    }
+    private scheduleHide() {
+      if (this.dragging) return;
+      window.clearTimeout(this.hideTimer);
+      this.hideTimer = window.setTimeout(() => this.thumb.classList.remove("is-visible"), 900);
+    }
+
+    private onScroll() {
+      this.layout();
+      this.show();
+      this.scheduleHide();
+    }
+    /** Hovering the minimap zone (right strip) reveals the scrollbar, like Sublime. */
+    private onHover(e: MouseEvent) {
+      const r = this.scroller.getBoundingClientRect();
+      if (r.right - e.clientX <= 130) {
+        this.show();
+        this.scheduleHide();
+      }
+    }
+
+    private onDown(e: PointerEvent) {
+      e.preventDefault();
+      this.dragging = true;
+      this.dragStartY = e.clientY;
+      this.dragStartTop = this.scroller.scrollTop;
+      this.thumb.setPointerCapture(e.pointerId);
+      this.thumb.addEventListener("pointermove", this.onMove);
+      this.thumb.addEventListener("pointerup", this.onUp);
+      this.show();
+    }
+    private onMove(e: PointerEvent) {
+      if (!this.dragging) return;
+      const { scrollHeight, clientHeight } = this.scroller;
+      const overflow = scrollHeight - clientHeight;
+      const track = clientHeight;
+      const h = Math.max(28, (clientHeight / scrollHeight) * track);
+      const dy = e.clientY - this.dragStartY;
+      this.scroller.scrollTop = this.dragStartTop + (dy * overflow) / (track - h);
+    }
+    private onUp(e: PointerEvent) {
+      this.dragging = false;
+      this.thumb.releasePointerCapture(e.pointerId);
+      this.thumb.removeEventListener("pointermove", this.onMove);
+      this.thumb.removeEventListener("pointerup", this.onUp);
+      this.scheduleHide();
+    }
+
+    destroy() {
+      window.clearTimeout(this.hideTimer);
+      this.scroller.removeEventListener("scroll", this.onScroll);
+      this.scroller.removeEventListener("mousemove", this.onHover);
+      this.thumb.remove();
+    }
+  }
+);
+
 /** Active-line highlight (line + gutter) for the current setting (empty = off). */
 function activeLineExt(): Extension {
   if (!state.settings.activeLine) return [];
   return [highlightActiveLine(), highlightActiveLineGutter()];
+}
+
+/** Editor font as a CM theme. The visual styling also exists in styles.css via
+    the --ed-font/--ed-size vars; this mirrors it so that font changes go through
+    a compartment RECONFIGURE — the only reliable way to make CM re-read styles
+    and refresh its cached metrics (requestMeasure alone provably does not:
+    stale line heights desynced the gutter and selection layer after zoom). */
+function fontTheme(): Extension {
+  return EditorView.theme({
+    "&": { fontSize: `${state.zoomSize}px` },
+    ".cm-scroller": { fontFamily: `${state.settings.fontFamily}, Menlo, Consolas, monospace` },
+  });
 }
 
 /** The minimap extension for the current setting (empty = disabled). */
@@ -125,25 +254,45 @@ const sublimeSelection = layer({
   markers(view) {
     const out: RectangleMarker[] = [];
     const CLS = "cm-selectionBackground";
-    const lh = view.defaultLineHeight;
-    const sliver = Math.max(3, view.defaultCharacterWidth * 0.55); // the "\n is selected" nub
+    // A line-height ESTIMATE only — used to classify row adjacency and to size
+    // isolated single rows; all interior geometry is derived from the measured
+    // rows themselves (see the band pass below), so a stale/wrong metric can't
+    // misplace boxes. Computed style first (CM's cached defaultLineHeight goes
+    // stale when zoom changes the font via a CSS var); handle px AND unitless.
+    const cs = getComputedStyle(view.contentDOM);
+    const fontPx = parseFloat(cs.fontSize) || 13;
+    let lh = parseFloat(cs.lineHeight);
+    if (!lh || Number.isNaN(lh)) lh = view.defaultLineHeight;
+    else if (lh < fontPx * 0.5) lh *= fontPx; // unitless multiplier (e.g. "1.3")
+    lh = Math.min(Math.max(lh, fontPx), fontPx * 3);
+    const sliver = Math.max(3, fontPx * 0.35); // the "\n is selected" nub
     const PAD = 2; // horizontal breathing room around the text (Sublime-like)
 
     // forRange rows are in the layer's coordinate space (unlike lineBlockAt,
-    // which is offset). Collect each visual row's raw (fractional) top plus its
-    // horizontal box; the vertical snap-and-tile happens in a second pass below.
-    const rows: { top: number; left: number; width: number }[] = [];
+    // which is offset). Collect the raw glyph rects; the vertical snap-and-tile
+    // happens in a second pass below.
+    const rows: { top: number; h: number; left: number; width: number }[] = [];
     const add = (m: RectangleMarker, opts: { last: boolean; newline: boolean; empty: boolean }) => {
-      const top = m.top - (lh - m.height) / 2; // grow to full line height, centered
       const left = Math.round(m.left - PAD);
-      let width: number;
-      if (opts.empty) {
-        width = sliver + PAD;
-      } else {
-        width = (m.width ?? 0) + PAD * 2;
-        if (opts.last && opts.newline) width += sliver;
+      // forRange MERGES the full-width interior rows of a wrapped selection into
+      // one tall rectangle. Split any such rect back into its rows (they're all
+      // full-width, so this reconstructs them exactly) — otherwise a line that
+      // wraps to ≥3 rows draws one box and leaves the middle rows unhighlighted.
+      const n = opts.empty ? 1 : Math.max(1, Math.round(m.height / lh));
+      const rowH = m.height / n;
+      for (let i = 0; i < n; i++) {
+        const lastSub = i === n - 1;
+        let width: number;
+        if (opts.empty) {
+          width = sliver + PAD;
+        } else {
+          // width can be null ("extends rightward"); never collapse to 0 —
+          // over-cover to the content edge (the scroller clips the excess).
+          width = (m.width ?? view.contentDOM.clientWidth) + PAD * 2;
+          if (opts.last && lastSub && opts.newline) width += sliver;
+        }
+        rows.push({ top: m.top + i * rowH, h: rowH, left, width: Math.round(width) });
       }
-      rows.push({ top, left, width: Math.round(width) });
     };
 
     for (const r of view.state.selection.ranges) {
@@ -173,22 +322,40 @@ const sublimeSelection = layer({
       }
     }
 
-    // Snap to the pixel grid by CHAINING: each row that is vertically contiguous
-    // with the one above takes its top from that row's snapped bottom, so they
-    // share the exact same boundary pixel — no gap, and no overlap either. (An
-    // overlap would paint a *darker* seam since the selection fill is translucent;
-    // a gap shows the background through. Per-row independent rounding produced
-    // both, because glyph measurements aren't spaced by exactly `lh`.)
-    rows.sort((a, b) => a.top - b.top);
-    let prevBottom: number | null = null;
-    let prevRawBottom = 0;
-    for (const row of rows) {
-      const contiguous = prevBottom != null && Math.abs(row.top - prevRawBottom) < lh * 0.5;
-      const top = contiguous ? (prevBottom as number) : Math.round(row.top);
-      const bottom = Math.max(top + 1, Math.round(row.top + lh));
-      out.push(new RectangleMarker(CLS, row.left, top, row.width, bottom - top));
-      prevBottom = bottom;
-      prevRawBottom = row.top + lh;
+    // Tile the boxes using only the measured rows themselves. Group glyph rects
+    // into visual-row bands (by vertical center), then within each contiguous
+    // run place the shared edge between neighbors at the rounded MIDPOINT of
+    // their centers: bottom(i) === top(i+1) by construction (no seam to show
+    // background, no overlap to double the translucent fill), and each box stays
+    // centered on its own measured text. No pitch assumption — earlier versions
+    // that derived positions from a line-height metric (grid/chaining) broke
+    // whenever that metric disagreed with the real layout (zoom, stale caches).
+    if (!rows.length) return out;
+    rows.sort((a, b) => a.top - b.top || a.left - b.left);
+    const bands: { center: number; items: typeof rows }[] = [];
+    for (const r of rows) {
+      const c = r.top + r.h / 2;
+      const last = bands[bands.length - 1];
+      if (last && Math.abs(c - last.center) < 3) last.items.push(r);
+      else bands.push({ center: c, items: [r] });
+    }
+    for (let i = 0; i < bands.length; ) {
+      let j = i;
+      while (j + 1 < bands.length && bands[j + 1].center - bands[j].center < lh * 1.6) j++;
+      const run = bands.slice(i, j + 1); // one contiguous stack of rows
+      const pitchTop = run.length > 1 ? run[1].center - run[0].center : lh;
+      const pitchBot = run.length > 1 ? run[run.length - 1].center - run[run.length - 2].center : lh;
+      let prevEdge = Math.round(run[0].center - pitchTop / 2);
+      for (let k = 0; k < run.length; k++) {
+        const edge =
+          k < run.length - 1
+            ? Math.round((run[k].center + run[k + 1].center) / 2)
+            : Math.round(run[k].center + pitchBot / 2);
+        const h = Math.max(1, edge - prevEdge);
+        for (const it of run[k].items) out.push(new RectangleMarker(CLS, it.left, prevEdge, it.width, h));
+        prevEdge = edge;
+      }
+      i = j + 1;
     }
     return out;
   },
@@ -225,11 +392,13 @@ export class Editor {
   private wrapComp = new Compartment();
   private minimapComp = new Compartment();
   private activeLineComp = new Compartment();
+  private fontComp = new Compartment();
 
   // Hot-exit persistence state machine.
   private dirty = false;
   private idleTimer = 0;
   private maxTimer = 0;
+  private remeasureTimer = 0;
 
   constructor(parent: HTMLElement, host: EditorHost) {
     this.host = host;
@@ -260,6 +429,8 @@ export class Editor {
       // Sublime-style minimap: a tiny render of the whole buffer on the right;
       // click or drag it to scroll. Gated behind a setting (applyMinimap).
       this.minimapComp.of(minimapExt()),
+      overlayScrollbar,
+      this.fontComp.of(fontTheme()),
       search({ top: true }),
       syntaxHighlighting(highlight),
       keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
@@ -269,6 +440,11 @@ export class Editor {
         if (u.docChanged) {
           this.schedule();
           this.host.titlesChanged();
+          // Typing can push a line into wrapping; re-measure so the gutter (and
+          // everything below) doesn't sit on the stale 1-row estimate. Debounced
+          // so it never runs mid-keystroke.
+          clearTimeout(this.remeasureTimer);
+          this.remeasureTimer = window.setTimeout(() => this.remeasureVisibleLines(), 120);
         }
         if (u.docChanged || u.selectionSet) this.host.statusChanged();
       }),
@@ -340,7 +516,11 @@ export class Editor {
     this.stash(this.activeId);
     this.activeId = id;
     this.view.setState(buf.state);
-    // setState resets scroll; restore after layout.
+    // setState resets scroll; restore after layout. Also force a re-measure —
+    // the swapped-in state may carry stale geometry (heights measured under a
+    // different font size / content width), which desyncs the gutter and
+    // selection layer until CM re-reads the DOM.
+    this.view.requestMeasure();
     requestAnimationFrame(() => {
       this.view.scrollDOM.scrollTop = buf.scrollTop;
     });
@@ -455,6 +635,42 @@ export class Editor {
     for (const buf of this.bufs.values()) {
       if (buf.id === this.activeId) continue;
       buf.state = buf.state.update({ effects: this.minimapComp.reconfigure(minimapExt()) }).state;
+    }
+  }
+
+  /** Font size (zoom) or family changed: reconfigure the font theme across every
+      buffer so CM re-reads styles and refreshes its cached line-height metrics. */
+  applyFontConfig(): void {
+    this.view.dispatch({ effects: this.fontComp.reconfigure(fontTheme()) });
+    for (const buf of this.bufs.values()) {
+      if (buf.id === this.activeId) continue;
+      buf.state = buf.state.update({ effects: this.fontComp.reconfigure(fontTheme()) }).state;
+    }
+    // The new font paints on later frames, and CM only re-measures wrapped-line
+    // heights on a measure pass — until then the height map keeps its 1-row
+    // ESTIMATE for lines that now wrap, so the gutter numbers and everything
+    // below sit at the wrong offset. In WKWebView the corrective pass can be very
+    // late (natively it looked permanent). Force several measures as the font
+    // settles; each reads the DOM heights and rewrites the height map.
+    requestAnimationFrame(() => this.remeasureVisibleLines());
+    for (const ms of [50, 150, 350, 650]) window.setTimeout(() => this.remeasureVisibleLines(), ms);
+  }
+
+  /** Force CM to measure the real height of every VISIBLE line, so a line that
+      now wraps stops being estimated as 1 row (which desyncs the gutter numbers
+      and everything below). coordsAtPos on each line's ends is what does it —
+      the same thing that "fixes it when you start a selection". lineNumbers'
+      gutter reads the height map, so it re-lays-out with the corrected heights. */
+  private remeasureVisibleLines(): void {
+    // coordsAtPos must be called DIRECTLY (synchronously) — the same call inside
+    // a requestMeasure read does NOT update the height map / gutter (verified).
+    const v = this.view;
+    const from = v.state.doc.lineAt(v.viewport.from).number;
+    const to = v.state.doc.lineAt(v.viewport.to).number;
+    for (let ln = from; ln <= to; ln++) {
+      const line = v.state.doc.line(ln);
+      v.coordsAtPos(line.from);
+      if (line.length) v.coordsAtPos(line.to);
     }
   }
 

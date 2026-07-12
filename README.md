@@ -9,7 +9,7 @@ Buffers are the point: text that lives in tabs, not files. Nothing is ever
 
 > **v0.1 — macOS.** Fixed-width, keyboard-first, its own clean design.
 
-<!-- Add a screenshot here once you have one: ![Buffers](docs/screenshot.png) -->
+![Buffers](docs/screenshot.png)
 
 ## What it does
 

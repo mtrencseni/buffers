@@ -4,8 +4,64 @@
 
 function load(key: string): unknown {
   const raw = localStorage.getItem(key);
-  return raw ? JSON.parse(raw) : null;
+  if (raw) return JSON.parse(raw);
+  // First run in the browser: seed a small demo session so the app (and the
+  // README screenshot / `pnpm dev`) shows real content. Native app is unaffected.
+  return key === "buffers-session" ? DEFAULT_SESSION : null;
 }
+
+const DEFAULT_SESSION = {
+  buffers: [
+    {
+      id: 1,
+      language: "markdown",
+      anchor: 0,
+      head: 0,
+      scrollTop: 0,
+      text: `# Release email — draft
+
+Hey team,
+
+**Buffers** is a scratch-pad editor: you open a tab, write an email or a
+prompt, then _copy it out_. Text lives in tabs, not files — nothing is ever
+"unsaved", because there's nothing to save.
+
+- Multiple tabs, each a buffer (title = first line)
+- Hot exit: everything comes back exactly as you left it
+- Syntax highlighting, find & replace, a minimap
+- Import a file with ⌘O, export with ⌘S — never linked
+
+> Draft it here, paste it wherever it's going.
+`,
+    },
+    {
+      id: 2,
+      language: "python",
+      anchor: 0,
+      head: 0,
+      scrollTop: 0,
+      text: `def fib(n):
+    a, b = 0, 1
+    for _ in range(n):
+        a, b = b, a + b
+    return a
+
+print([fib(i) for i in range(10)])
+`,
+    },
+    {
+      id: 3,
+      language: "plain",
+      anchor: 0,
+      head: 0,
+      scrollTop: 0,
+      text: "todo: reply to Sam\ntodo: book the room for Thursday\n",
+    },
+  ],
+  activeId: 1,
+  closed: [],
+  zoomSize: 14,
+};
 
 function save(key: string, value: unknown): void {
   localStorage.setItem(key, JSON.stringify(value ?? null));
