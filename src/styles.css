@@ -830,7 +830,11 @@ body.tab-dragging * {
 .settings-inner {
   max-width: 34rem;
   margin: 0 auto;
-  padding: 2rem 2rem 3rem;
+  padding: 2rem 2.5rem 3rem;
+  box-sizing: border-box;
+  min-height: 100%; /* so the flanking rules span the full height, not just content */
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
 }
 
 .settings h1 {

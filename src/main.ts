@@ -126,6 +126,9 @@ class App {
     // Native menu items route through the same handlers as the shortcuts.
     onEvent<string>("menu", (id) => this.commandHandlers[id as CommandId]?.());
 
+    // Drop files onto the window → import each into a new buffer (like ⌘O).
+    this.setupFileDrop();
+
     // Last-resort flush when the window goes away.
     window.addEventListener("pagehide", () => this.editor.flush());
     requestAnimationFrame(() => this.fitTabTitles());
@@ -680,15 +683,37 @@ class App {
     const { open } = await import("@tauri-apps/plugin-dialog");
     const path = await open({ multiple: false, directory: false, title: "Import into a buffer" });
     if (typeof path !== "string") return;
-    try {
-      const text = await invoke<string>("read_file", { path });
-      this.editor.newBuffer(text, langForFilename(path));
-      this.showBuffers();
-      this.renderTabstrip();
-      toast("Imported — the buffer is now on its own");
-    } catch (e) {
-      toast(String(e));
+    await this.openPaths([path]);
+  }
+
+  /** Read each path into its own new buffer — shared by ⌘O import and file drop. */
+  private async openPaths(paths: string[]): Promise<void> {
+    let opened = 0;
+    for (const path of paths) {
+      try {
+        const text = await invoke<string>("read_file", { path });
+        this.editor.newBuffer(text, langForFilename(path));
+        opened++;
+      } catch (e) {
+        toast(String(e));
+      }
     }
+    if (!opened) return;
+    this.showBuffers();
+    this.renderTabstrip();
+    toast(opened === 1 ? "Imported — the buffer is now on its own" : `Imported ${opened} files`);
+  }
+
+  /** Native OS file drop onto the window → import the dropped files (Tauri only). */
+  private setupFileDrop(): void {
+    if (!isTauri) return;
+    void import("@tauri-apps/api/webview").then((m) =>
+      m.getCurrentWebview().onDragDropEvent((event) => {
+        if (event.payload.type === "drop" && event.payload.paths.length) {
+          void this.openPaths(event.payload.paths);
+        }
+      })
+    );
   }
 
   private async exportFile(): Promise<void> {

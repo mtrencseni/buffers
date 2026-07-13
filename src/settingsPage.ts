@@ -83,8 +83,8 @@ export function buildSettingsPage(hooks: SettingsHooks): SettingsPage {
   const tabSeg = el("div", "seg");
   const tabSideBtns = new Map<"top" | "left", HTMLButtonElement>();
   for (const [side, label] of [
-    ["top", "Top"],
     ["left", "Left"],
+    ["top", "Top"],
   ] as ["top" | "left", string][]) {
     const b = el("button", "", label);
     b.addEventListener("click", () => {
