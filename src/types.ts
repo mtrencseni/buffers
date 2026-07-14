@@ -1,26 +1,10 @@
+import type { LangId } from "./langs";
+
 export type Theme = "light" | "dark" | "system";
 
-/** Language id — keys of the registry in langs.ts. */
-export type LangId =
-  | "plain"
-  | "markdown"
-  | "javascript"
-  | "typescript"
-  | "json"
-  | "python"
-  | "c"
-  | "cpp"
-  | "csharp"
-  | "java"
-  | "kotlin"
-  | "rust"
-  | "sql"
-  | "bash"
-  | "html"
-  | "css"
-  | "latex"
-  | "yaml"
-  | "xml";
+/** Language id lives in langs.ts (keeps that module dependency-closed); re-export
+    it here so the rest of the app keeps importing it from types. */
+export type { LangId };
 
 export interface Settings {
   theme: Theme;

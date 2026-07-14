@@ -32,6 +32,23 @@ cd src-tauri && cargo check
 
 Dev server runs on **:1430** (Delight uses :1420, so both can run at once).
 
+## Shared with Delight — `editor-core.ts` / `editor-core.css` / `langs.ts`
+
+These three files are the **single source of truth** for the editor look-and-feel
+and are **symlinked into Delight** (`~/Repositories/Delight/src/`) for its
+read-only code preview — so a fix to the selection layer, syntax colors, or
+languages lands in both apps. `editor.ts` imports the shared CM pieces
+(`highlight`, `sublimeSelection`, `selectionWhitespace`, `overlayScrollbar`,
+`minimapExtension`) from `editor-core.ts`; `editor-core.css` holds the
+`.edhost .cm-editor` styling + the `--ed-*`/`--syn-*` tokens (scoped to `.edhost`).
+
+**Invariant — keep them dependency-closed:** `editor-core.ts` and `langs.ts` may
+import **only** CodeMirror/Lezer packages (and `editor-core.css`), never `./state`,
+`./ipc`, `./types`, etc. That's what lets Delight symlink them. `LangId` lives in
+`langs.ts` (types.ts re-exports it) for the same reason. If you add an app-state
+dependency here, Delight's build breaks. See Delight's CLAUDE.md for the Vite
+`resolve.alias` that keeps CodeMirror a single instance across the symlink.
+
 ## Architecture
 
 Frontend is the whole app; the Rust backend is tiny (persistence + file IO +
