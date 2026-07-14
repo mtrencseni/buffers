@@ -26,11 +26,30 @@ fn nudge_relayout(window: &tauri::Window) {
     });
 }
 
+/// The window starts hidden (`visible: false` in tauri.conf.json) and the frontend
+/// calls this once it has fully rendered — otherwise the webview's default white
+/// background is visible for the first few hundred ms while the page loads.
+#[tauri::command]
+fn show_main_window(window: tauri::WebviewWindow) {
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         // Remembers window size/position across launches (see first-run sizing below).
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        // VISIBLE is excluded: restoring it would show the window during setup,
+        // before the webview has painted — the white flash `visible: false` exists
+        // to prevent. The frontend shows the window itself (show_main_window).
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all()
+                        .difference(tauri_plugin_window_state::StateFlags::VISIBLE),
+                )
+                .build(),
+        )
         .invoke_handler(tauri::generate_handler![
             store::load_state,
             store::save_state,
@@ -40,6 +59,7 @@ pub fn run() {
             files::write_file,
             devtools::toggle_devtools,
             devtools::close_devtools,
+            show_main_window,
         ])
         .on_window_event(|window, event| match event {
             // The window-state plugin only persists on a clean exit; that never
@@ -83,6 +103,18 @@ pub fn run() {
                         let _ = win.center();
                     }
                 }
+            }
+
+            // Failsafe for the hidden start: if the frontend dies before it can
+            // call show_main_window (JS error, asset failure), reveal the window
+            // anyway after a beat — a broken page beats an invisible app.
+            if let Some(win) = app.get_webview_window("main") {
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(3));
+                    if !win.is_visible().unwrap_or(true) {
+                        let _ = win.show();
+                    }
+                });
             }
 
             // macOS 13.3+ requires WKWebView.isInspectable = true for the Web

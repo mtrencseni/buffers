@@ -123,8 +123,10 @@ svg {
   background: var(--header);
 }
 
-/* Native window: the bar is the title bar — inset past the traffic lights. */
-:root.native .tabbar {
+/* Native macOS window: the bar IS the title bar (titleBarStyle: Overlay), so it
+   must inset past the traffic lights. Windows/Linux get standard window chrome
+   above the bar — no overlay, no inset — hence the .mac gate. */
+:root.native.mac .tabbar {
   padding-top: 0.625rem;
   padding-left: 80px;
   min-height: 2.75rem;
@@ -259,6 +261,32 @@ body.tab-dragging * {
   flex: 1;
 }
 
+/* ---------- action toolbar (import / export / close / find / replace) ---------- */
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+  flex: none;
+  /* Only bites in the sidebar, where the head can be dragged down to 140px — the
+     row of actions + the + button needs ~186px, so let it flow onto a second line
+     instead of spilling past the sidebar edge. The top bar always has room. */
+  flex-wrap: wrap;
+}
+
+/* In the top bar the group follows +, with healthy breathing room so the actions
+   read as a toolbar and not as more tab chrome. (The sidebar head is tight — it's
+   already its own row, and the width is at a premium there.) */
+.tabbar .actions {
+  margin-left: 0.875rem;
+}
+
+/* In the sidebar the group must be allowed to shrink below its max-content width,
+   or flex-wrap above can never engage and the icons run past the sidebar edge. */
+.tabs-left .actions {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
 /* ---------- left sidebar tabs (Settings → Tab bar = Left) ---------- */
 .sidebar {
   display: none; /* only shown in left mode */
@@ -285,15 +313,16 @@ body.tab-dragging * {
 .sidebar-head {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start; /* actions then + , left-justified */
+  flex-wrap: wrap; /* narrow sidebar: the toolbar grows a second row, never spills */
   gap: 0.25rem;
   padding: 0.375rem;
   min-height: 2rem;
   flex: none;
 }
 
-/* Native window: clear the traffic lights that float over the top-left. */
-:root.native .tabs-left .sidebar-head {
+/* Native macOS window: clear the traffic lights that float over the top-left. */
+:root.native.mac .tabs-left .sidebar-head {
   padding-top: 0.625rem;
   padding-left: 80px;
   min-height: 2.5rem;

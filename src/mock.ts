@@ -29,7 +29,7 @@ prompt, then _copy it out_. Text lives in tabs, not files — nothing is ever
 - Multiple tabs, each a buffer (title = first line)
 - Hot exit: everything comes back exactly as you left it
 - Syntax highlighting, find & replace, a minimap
-- Import a file with ⌘O, export with ⌘S — never linked
+- Files are imported and exported, never linked
 
 > Draft it here, paste it wherever it's going.
 `,

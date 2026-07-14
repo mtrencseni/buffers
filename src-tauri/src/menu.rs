@@ -1,13 +1,33 @@
-//! Custom app menu. The default Tauri menu binds Cmd+W to "Close Window" and
-//! Cmd+T is reserved for tabs — Buffers handles both in the webview, so we
-//! install a menu without conflicting key equivalents. Custom items emit a
-//! "menu" event with the command id; the frontend routes it through the same
-//! handlers as the (rebindable) keyboard shortcuts.
+//! Custom app menu — **macOS only**.
+//!
+//! On macOS the menu lives in the global bar at the top of the screen, outside our
+//! window, so it costs the design nothing. We install our own (rather than take
+//! Tauri's default) because that one binds Cmd+W to "Close Window" and reserves
+//! Cmd+T, both of which Buffers handles in the webview. Custom items carry no key
+//! equivalents — they'd shadow the rebindable in-app shortcuts — and instead emit a
+//! "menu" event with the command id, which the frontend routes through the same
+//! handlers as the keyboard shortcuts.
+//!
+//! On Windows/Linux there is no global bar: the menu would be a Win32/GTK bar drawn
+//! *inside* our window, in the OS's colors, which no API lets us theme — a grey
+//! strip across the top of a Mariana-dark window. That breaks the "own design, not
+//! native emulation" rule, so we install no menu at all and surface the same actions
+//! in the in-app toolbar next to + (see `actionsEl` in main.ts). Nothing is lost:
+//! every item was already a shortcut, and the webview handles cut/copy/paste itself.
 
+#[cfg(target_os = "macos")]
 use tauri::menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
-use tauri::{AppHandle, Emitter, Runtime};
+use tauri::{AppHandle, Runtime};
 
+#[cfg(not(target_os = "macos"))]
+pub fn install<R: Runtime>(_app: &AppHandle<R>) -> tauri::Result<()> {
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
 pub fn install<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    use tauri::Emitter;
+
     let app_menu = SubmenuBuilder::new(app, "Buffers")
         .about(Some(AboutMetadata::default()))
         .separator()

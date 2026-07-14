@@ -7,7 +7,7 @@ ChatGPT — then copy it out to wherever it's going.
 Buffers are the point: text that lives in tabs, not files. Nothing is ever
 "unsaved," because there's nothing to save.
 
-> **v0.1 — macOS.** Fixed-width, keyboard-first, its own clean design.
+> **v0.1 — macOS and Windows.** Fixed-width, keyboard-first, its own clean design.
 
 ![Buffers](docs/screenshot.png)
 
@@ -43,12 +43,17 @@ Requires [Node](https://nodejs.org) + [pnpm](https://pnpm.io) and the
 pnpm install
 pnpm tauri dev      # run the native app with hot-reload
 pnpm dev            # browser-only UI (buffers persist to localStorage)
-pnpm tauri build    # → src-tauri/target/release/bundle/macos/Buffers.app
+pnpm tauri build    # macOS   → src-tauri/target/release/bundle/macos/Buffers.app
+                    # Windows → src-tauri/target/release/bundle/nsis/*-setup.exe
 ```
+
+On Windows you also need the [MSVC C++ build tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
+(for the Rust linker) and the WebView2 runtime (preinstalled on Windows 11).
 
 ## Keyboard shortcuts
 
-All rebindable in **Settings → Keyboard → Configure shortcuts**. Defaults:
+All rebindable in **Settings → Keyboard → Configure shortcuts**. Defaults below
+are macOS; **on Windows every ⌘ is Ctrl** (⌘T → Ctrl+T, ⌥ → Alt):
 
 | Keys | Action |
 | --- | --- |
@@ -69,12 +74,13 @@ All rebindable in **Settings → Keyboard → Configure shortcuts**. Defaults:
 ## Privacy & data
 
 Buffers live in a single JSON file in the app's own config dir
-(`~/Library/Application Support/com.trencseni.buffers/`). Buffers only ever
-writes there — plus files you explicitly pick in an export dialog.
+(`~/Library/Application Support/com.trencseni.buffers/` on macOS,
+`%APPDATA%\com.trencseni.buffers\` on Windows). Buffers only ever writes there —
+plus files you explicitly pick in an export dialog.
 
 ## Tech
 
-Tauri 2 (Rust backend + WKWebView) + vanilla TypeScript / Vite, with
+Tauri 2 (Rust backend + WKWebView / WebView2) + vanilla TypeScript / Vite, with
 [CodeMirror 6](https://codemirror.net) as the editor. A sibling project to
 [Delight](https://github.com/mtrencseni/delight) — it reuses its shell (tabs,
 settings, shortcuts, theming). See [CLAUDE.md](CLAUDE.md) for architecture and

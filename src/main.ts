@@ -1,10 +1,11 @@
 import "./styles.css";
 import { invoke, isTauri, onEvent } from "./ipc";
-import { FONT_MAX, FONT_MIN, SIDEBAR_MAX, SIDEBAR_MIN, persist, state } from "./state";
+import { FONT_MAX, FONT_MIN, SIDEBAR_MAX, SIDEBAR_MIN, hint as kbHint, persist, state } from "./state";
 import type { LangId, Theme } from "./types";
 import { Editor } from "./editor";
 import { initKeyboard } from "./keyboard";
 import { COMMANDS, mergeKeybindings, type CommandId } from "./commands";
+import { isMac } from "./platform";
 import { applyTheme, effectiveTheme, onThemeChange } from "./theme";
 import { toast } from "./toast";
 import { icons } from "./icons";
@@ -22,6 +23,13 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string): HTMLEl
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
+/** " (⌘T)" / " (Ctrl+T)" — the command's current binding, parenthesized for a
+ *  tooltip. Platform-correct and rebind-aware; never spell a shortcut by hand. */
+function hint(id: CommandId): string {
+  const h = kbHint(id);
+  return h ? ` (${h})` : "";
+}
+
 class App {
   tabsEl = el("div", "tabs");
   sysTabsEl = el("div", "systabs");
@@ -30,6 +38,9 @@ class App {
   devBtn = el("button", "tbtn");
   newBtn = el("button", "tbtn");
   gearBtn = el("button", "tbtn");
+  // The action toolbar (import / export / close / find / replace) — the buttons
+  // the native menu used to carry. Re-parented next to newBtn by applyTabsLayout.
+  actionsEl = el("div", "actions");
   // Top-tabs container and the left-sidebar container; only one is populated at a
   // time (see applyTabsLayout). The sidebar has a resize handle on its right edge.
   tabbar = el("div", "tabbar");
@@ -133,6 +144,16 @@ class App {
     window.addEventListener("pagehide", () => this.editor.flush());
     requestAnimationFrame(() => this.fitTabTitles());
 
+    // The window starts hidden (visible: false) so the webview's white default
+    // background never shows. Everything is built and restored by now; wait two
+    // rAFs — the first schedules alongside the pending layout, the second fires
+    // after that frame has actually been composited — then reveal.
+    if (isTauri) {
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => void invoke("show_main_window").catch(() => {}))
+      );
+    }
+
     // Browser-only test hook (used by the preview harness alongside mock.ts).
     if (!isTauri) (window as any).__buffers = this;
   }
@@ -162,21 +183,41 @@ class App {
 
   private buildShell(): void {
     const root = document.getElementById("app")!;
+    // .native = running in Tauri (not the browser mock); .mac gates the macOS-only
+    // integrated-titlebar insets (traffic lights). Windows/Linux keep normal chrome.
     if (isTauri) document.documentElement.classList.add("native");
+    if (isMac) document.documentElement.classList.add("mac");
 
     this.newBtn.innerHTML = icons.plus;
-    this.newBtn.title = "New buffer (⌘T)";
+    this.newBtn.title = "New buffer" + hint("newTab");
     this.newBtn.addEventListener("click", () => this.commandHandlers.newTab());
+
+    // Every action here is also a shortcut and lives in the same command registry —
+    // the toolbar just makes the important ones visible (there's no native menu).
+    const action = (id: CommandId, icon: string, label: string) => {
+      const b = el("button", "tbtn");
+      b.innerHTML = icon;
+      b.title = label + hint(id);
+      b.addEventListener("click", () => this.commandHandlers[id]());
+      return b;
+    };
+    this.actionsEl.append(
+      action("importFile", icons.importFile, "Import file"),
+      action("exportFile", icons.exportFile, "Export buffer"),
+      action("closeTab", icons.closeBuffer, "Close buffer"),
+      action("find", icons.search, "Find"),
+      action("replace", icons.replace, "Find & replace")
+    );
 
     this.themeBtn.addEventListener("click", () => this.toggleTheme());
     onThemeChange(() => this.syncThemeBtn());
 
     this.devBtn.innerHTML = icons.code;
-    this.devBtn.title = "Developer tools (⌥⌘I)";
+    this.devBtn.title = "Developer tools" + hint("devtools");
     this.devBtn.addEventListener("click", () => void invoke("toggle_devtools").catch(() => {}));
 
     this.gearBtn.innerHTML = icons.gear;
-    this.gearBtn.title = "Settings (⌘,)";
+    this.gearBtn.title = "Settings" + hint("openSettings");
     this.gearBtn.addEventListener("click", () => this.openSys("settings"));
 
     this.sidebarResize.addEventListener("mousedown", (e) => this.beginSidebarResize(e));
@@ -206,21 +247,25 @@ class App {
     const left = state.settings.tabsSide === "left";
     document.getElementById("app")!.classList.toggle("tabs-left", left);
     if (left) {
+      // Sidebar: the head is a left-justified toolbar — actions, then + at its end.
       const head = el("div", "sidebar-head");
       head.setAttribute("data-tauri-drag-region", "");
-      head.append(this.newBtn);
+      head.append(this.actionsEl, this.newBtn);
       const controls = el("div", "sidebar-controls");
       controls.append(this.themeBtn, this.devBtn, this.gearBtn);
       this.sidebar.replaceChildren(head, this.tabsEl, this.sysTabsEl, controls, this.sidebarResize);
       this.sidebar.style.width = `${state.settings.sidebarWidth}px`;
       this.tabbar.replaceChildren();
     } else {
+      // Top bar: tabs, +, then the actions — set off from + by a wider gap so they
+      // read as a toolbar rather than more tab chrome. The spacer keeps them left.
       const spacer = el("div", "flexspace");
       spacer.setAttribute("data-tauri-drag-region", "");
       this.tabbar.setAttribute("data-tauri-drag-region", "");
       this.tabbar.append(
         this.tabsEl,
         this.newBtn,
+        this.actionsEl,
         spacer,
         this.sysTabsEl,
         this.themeBtn,
@@ -285,7 +330,7 @@ class App {
       title.textContent = this.title(id);
       const close = el("span", "tabclose");
       close.innerHTML = icons.close;
-      close.title = "Close buffer (⌘W)";
+      close.title = "Close buffer" + hint("closeTab");
       t.append(title, close);
       t.addEventListener("mousedown", (e) => {
         if (e.button !== 0 || (e.target as HTMLElement).closest(".tabclose")) return;

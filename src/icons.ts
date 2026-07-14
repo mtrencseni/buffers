@@ -25,4 +25,11 @@ export const icons = {
   importFile: svg('<path d="M8 2.5v7M5 6.7 8 9.7l3-3"/><path d="M2.5 10.5v2c0 .55.45 1 1 1h9c.55 0 1-.45 1-1v-2"/>'),
   exportFile: svg('<path d="M8 9.5v-7M5 5.3 8 2.3l3 3"/><path d="M2.5 10.5v2c0 .55.45 1 1 1h9c.55 0 1-.45 1-1v-2"/>'),
   search: svg('<circle cx="7" cy="7" r="4.25"/><path d="m10.5 10.5 3 3"/>'),
+  // Close buffer: an x boxed in, so it reads as "close this buffer" in the
+  // toolbar rather than repeating the bare x that closes a tab from its own row.
+  closeBuffer: svg('<rect x="2.5" y="2.5" width="11" height="11" rx="1.6"/><path d="M6 6l4 4M10 6l-4 4"/>'),
+  // Find & replace: the find lens plus the swap arrows that make it a replace.
+  replace: svg(
+    '<circle cx="6.5" cy="6.5" r="3.75"/><path d="m9.4 9.4 1.4 1.4"/><path d="M9 13h4.5m-1.6-1.6L13.5 13l-1.6 1.6"/>'
+  ),
 };

@@ -1,5 +1,5 @@
 import type { LangId, Settings, Theme } from "./types";
-import { FONT_MAX, FONT_MIN } from "./state";
+import { FONT_MAX, FONT_MIN, hint } from "./state";
 import { LANG_IDS, LANGS } from "./langs";
 import { icons } from "./icons";
 
@@ -178,12 +178,12 @@ export function buildSettingsPage(hooks: SettingsHooks): SettingsPage {
     "Appearance",
     row("Theme", "Light, dark, or follow the OS", seg),
     row("Font", "Editor font family (fixed-width recommended)", fontInput),
-    row("Font size", "Base size in px — ⌘0 returns here", stepper)
+    row("Font size", `Base size in px — ${hint("zoomReset")} returns here`, stepper)
   );
 
   section(
     "Editor",
-    row("Wrap lines", "Soft-wrap long lines (good for prose) — ⌥Z", wrapSw),
+    row("Wrap lines", `Soft-wrap long lines (good for prose) — ${hint("toggleWrap")}`, wrapSw),
     row("Minimap", "Tiny preview of the whole buffer on the right — click it to scroll", minimapSw),
     row("Highlight active line", "Shade the line the cursor is on", activeLineSw),
     row("Default language", "Syntax assumed for new buffers", langWrap),
@@ -198,7 +198,7 @@ export function buildSettingsPage(hooks: SettingsHooks): SettingsPage {
 
   section(
     "Advanced",
-    row("Enable developer tools", "Toggle the Web Inspector with ⌥⌘I", devToolsSw)
+    row("Enable developer tools", `Toggle the Web Inspector with ${hint("devtools")}`, devToolsSw)
   );
 
   const setSwitch = (s: HTMLElement, on: boolean) => {

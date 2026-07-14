@@ -2,6 +2,13 @@
 // stable id, a human label, a group (for the Shortcuts tab), and default key
 // bindings. Effective bindings live in state.keybindings (persisted); the
 // keyboard handler matches a pressed combo against them and runs the command.
+//
+// Defaults are written against MOD — the primary modifier — which is Meta (⌘) on
+// macOS and Ctrl elsewhere. Combo strings stay canonical ("Ctrl+KeyT"), so a
+// binding persisted on one platform still parses on another; only the defaults
+// differ. Bindings remain rebindable everywhere.
+
+import { isMac, MOD } from "./platform";
 
 export type CommandId =
   | "newTab"
@@ -40,37 +47,37 @@ export interface Command {
 
 export const COMMANDS: Command[] = [
   // Tabs
-  { id: "newTab", label: "New buffer", group: "Buffers", defaults: ["Meta+KeyT", "Meta+KeyN"] },
-  { id: "closeTab", label: "Close buffer", group: "Buffers", defaults: ["Meta+KeyW"] },
-  { id: "reopenTab", label: "Reopen closed buffer", group: "Buffers", defaults: ["Meta+Shift+KeyT"] },
-  { id: "nextTab", label: "Next buffer", group: "Buffers", defaults: ["Meta+Shift+BracketRight", "Ctrl+Tab"] },
-  { id: "prevTab", label: "Previous buffer", group: "Buffers", defaults: ["Meta+Shift+BracketLeft", "Ctrl+Shift+Tab"] },
-  { id: "cycleTab", label: "Cycle buffers", group: "Buffers", defaults: ["Meta+Backquote"] },
-  { id: "goTab1", label: "Go to buffer 1", group: "Buffers", defaults: ["Meta+Digit1"] },
-  { id: "goTab2", label: "Go to buffer 2", group: "Buffers", defaults: ["Meta+Digit2"] },
-  { id: "goTab3", label: "Go to buffer 3", group: "Buffers", defaults: ["Meta+Digit3"] },
-  { id: "goTab4", label: "Go to buffer 4", group: "Buffers", defaults: ["Meta+Digit4"] },
-  { id: "goTab5", label: "Go to buffer 5", group: "Buffers", defaults: ["Meta+Digit5"] },
-  { id: "goTab6", label: "Go to buffer 6", group: "Buffers", defaults: ["Meta+Digit6"] },
-  { id: "goTab7", label: "Go to buffer 7", group: "Buffers", defaults: ["Meta+Digit7"] },
-  { id: "goTab8", label: "Go to buffer 8", group: "Buffers", defaults: ["Meta+Digit8"] },
-  { id: "goLastTab", label: "Go to last buffer", group: "Buffers", defaults: ["Meta+Digit9"] },
-  { id: "openSettings", label: "Open settings", group: "Buffers", defaults: ["Meta+Comma"] },
+  { id: "newTab", label: "New buffer", group: "Buffers", defaults: [`${MOD}+KeyT`, `${MOD}+KeyN`] },
+  { id: "closeTab", label: "Close buffer", group: "Buffers", defaults: [`${MOD}+KeyW`] },
+  { id: "reopenTab", label: "Reopen closed buffer", group: "Buffers", defaults: [`${MOD}+Shift+KeyT`] },
+  { id: "nextTab", label: "Next buffer", group: "Buffers", defaults: [`${MOD}+Shift+BracketRight`, "Ctrl+Tab"] },
+  { id: "prevTab", label: "Previous buffer", group: "Buffers", defaults: [`${MOD}+Shift+BracketLeft`, "Ctrl+Shift+Tab"] },
+  { id: "cycleTab", label: "Cycle buffers", group: "Buffers", defaults: [`${MOD}+Backquote`] },
+  { id: "goTab1", label: "Go to buffer 1", group: "Buffers", defaults: [`${MOD}+Digit1`] },
+  { id: "goTab2", label: "Go to buffer 2", group: "Buffers", defaults: [`${MOD}+Digit2`] },
+  { id: "goTab3", label: "Go to buffer 3", group: "Buffers", defaults: [`${MOD}+Digit3`] },
+  { id: "goTab4", label: "Go to buffer 4", group: "Buffers", defaults: [`${MOD}+Digit4`] },
+  { id: "goTab5", label: "Go to buffer 5", group: "Buffers", defaults: [`${MOD}+Digit5`] },
+  { id: "goTab6", label: "Go to buffer 6", group: "Buffers", defaults: [`${MOD}+Digit6`] },
+  { id: "goTab7", label: "Go to buffer 7", group: "Buffers", defaults: [`${MOD}+Digit7`] },
+  { id: "goTab8", label: "Go to buffer 8", group: "Buffers", defaults: [`${MOD}+Digit8`] },
+  { id: "goLastTab", label: "Go to last buffer", group: "Buffers", defaults: [`${MOD}+Digit9`] },
+  { id: "openSettings", label: "Open settings", group: "Buffers", defaults: [`${MOD}+Comma`] },
 
   // Files
-  { id: "importFile", label: "Import file into a buffer", group: "Files", defaults: ["Meta+KeyO"] },
-  { id: "exportFile", label: "Export buffer to a file", group: "Files", defaults: ["Meta+KeyS"] },
+  { id: "importFile", label: "Import file into a buffer", group: "Files", defaults: [`${MOD}+KeyO`] },
+  { id: "exportFile", label: "Export buffer to a file", group: "Files", defaults: [`${MOD}+KeyS`] },
 
   // Editing
-  { id: "find", label: "Find", group: "Editing", defaults: ["Meta+KeyF"] },
-  { id: "replace", label: "Find & replace", group: "Editing", defaults: ["Meta+Alt+KeyF"] },
+  { id: "find", label: "Find", group: "Editing", defaults: [`${MOD}+KeyF`] },
+  { id: "replace", label: "Find & replace", group: "Editing", defaults: [`${MOD}+Alt+KeyF`] },
 
   // View
   { id: "toggleWrap", label: "Toggle line wrap", group: "View", defaults: ["Alt+KeyZ"] },
-  { id: "zoomIn", label: "Bigger text", group: "View", defaults: ["Meta+Equal", "Meta+NumpadAdd"] },
-  { id: "zoomOut", label: "Smaller text", group: "View", defaults: ["Meta+Minus", "Meta+NumpadSubtract"] },
-  { id: "zoomReset", label: "Reset text size", group: "View", defaults: ["Meta+Digit0", "Meta+Numpad0"] },
-  { id: "devtools", label: "Developer tools", group: "View", defaults: ["Meta+Alt+KeyI"] },
+  { id: "zoomIn", label: "Bigger text", group: "View", defaults: [`${MOD}+Equal`, `${MOD}+NumpadAdd`] },
+  { id: "zoomOut", label: "Smaller text", group: "View", defaults: [`${MOD}+Minus`, `${MOD}+NumpadSubtract`] },
+  { id: "zoomReset", label: "Reset text size", group: "View", defaults: [`${MOD}+Digit0`, `${MOD}+Numpad0`] },
+  { id: "devtools", label: "Developer tools", group: "View", defaults: [`${MOD}+Alt+KeyI`] },
 ];
 
 /** Group order for the Shortcuts tab (first-seen order in COMMANDS). */
@@ -104,7 +111,11 @@ export function comboHasStrongMod(combo: string): boolean {
   return combo.split("+").some((p) => p === "Meta" || p === "Ctrl" || p === "Alt");
 }
 
-const MOD_SYMBOL: Record<string, string> = { Meta: "⌘", Ctrl: "⌃", Alt: "⌥", Shift: "⇧" };
+// macOS renders modifiers as glyphs, run together (⌘⇧T). Windows/Linux spell them
+// out and join with "+" (Ctrl+Shift+T) — the convention users expect there.
+const MOD_SYMBOL: Record<string, string> = isMac
+  ? { Meta: "⌘", Ctrl: "⌃", Alt: "⌥", Shift: "⇧" }
+  : { Meta: "Win", Ctrl: "Ctrl", Alt: "Alt", Shift: "Shift" };
 const CODE_SYMBOL: Record<string, string> = {
   ArrowUp: "↑",
   ArrowDown: "↓",
@@ -146,11 +157,13 @@ function keyLabel(code: string): string {
   return CODE_SYMBOL[code] ?? code;
 }
 
-/** Human-readable label for a combo, e.g. "Meta+Shift+Period" -> "⌘⇧.". */
+/** Human-readable label for a combo: "Meta+Shift+Period" -> "⌘⇧." on macOS,
+ *  "Ctrl+Shift+Period" -> "Ctrl+Shift+." elsewhere. */
 export function comboLabel(combo: string): string {
   const parts = combo.split("+");
   const key = parts.pop() ?? "";
-  return parts.map((p) => MOD_SYMBOL[p] ?? p).join("") + keyLabel(key);
+  const mods = parts.map((p) => MOD_SYMBOL[p] ?? p);
+  return isMac ? mods.join("") + keyLabel(key) : [...mods, keyLabel(key)].join("+");
 }
 
 export function defaultKeybindings(): Record<CommandId, string[]> {
