@@ -25,6 +25,9 @@ export const icons = {
   importFile: svg('<path d="M8 2.5v7M5 6.7 8 9.7l3-3"/><path d="M2.5 10.5v2c0 .55.45 1 1 1h9c.55 0 1-.45 1-1v-2"/>'),
   exportFile: svg('<path d="M8 9.5v-7M5 5.3 8 2.3l3 3"/><path d="M2.5 10.5v2c0 .55.45 1 1 1h9c.55 0 1-.45 1-1v-2"/>'),
   search: svg('<circle cx="7" cy="7" r="4.25"/><path d="m10.5 10.5 3 3"/>'),
+  // Pushpin (name-pin toggle) and a chain link (linked-file indicator).
+  pin: svg('<path d="M9.5 2.5 13.5 6.5M11 4 7.5 7.5l-3 .6-.8.8 4.4 4.4.8-.8.6-3L14 6"/><path d="M6 10 2.5 13.5"/>'),
+  link: svg('<path d="M6.5 9.5 9.5 6.5M7 4.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-1 1M9 11.5l-1 1a2.5 2.5 0 0 1-3.5-3.5l1-1"/>'),
   // Close buffer: an x boxed in, so it reads as "close this buffer" in the
   // toolbar rather than repeating the bare x that closes a tab from its own row.
   closeBuffer: svg('<rect x="2.5" y="2.5" width="11" height="11" rx="1.6"/><path d="M6 6l4 4M10 6l-4 4"/>'),

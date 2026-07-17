@@ -451,6 +451,68 @@ body.tab-dragging * {
 
 .statusinfo {
   font-variant-numeric: tabular-nums;
+  margin-right: auto; /* keep the info left; pin + file + lang group on the right */
+}
+
+/* Name-pin toggle in the status bar. */
+.statusbtn {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem;
+  border-radius: 0.25rem;
+  color: var(--text-dim);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.statusbtn svg {
+  width: 0.875rem;
+  height: 0.875rem;
+}
+.statusbtn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.statusbtn.on {
+  color: var(--accent);
+}
+
+/* Linked-file indicator: link icon · file name · unlink ✕. Hidden when unlinked. */
+.filelink {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  max-width: 16rem;
+  color: var(--text-dim);
+}
+.filelink.hidden {
+  display: none;
+}
+.filelink-icon {
+  display: inline-flex;
+  color: var(--accent);
+}
+.filelink-icon svg {
+  width: 0.8125rem;
+  height: 0.8125rem;
+}
+.filelink-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.filelink-unlink {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.0625rem;
+  border-radius: 0.1875rem;
+  color: var(--text-dim);
+}
+.filelink-unlink svg {
+  width: 0.6875rem;
+  height: 0.6875rem;
+}
+.filelink-unlink:hover {
+  background: var(--hover);
+  color: var(--text);
 }
 
 .langbtn {

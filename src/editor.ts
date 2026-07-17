@@ -16,7 +16,14 @@ import {
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { bracketMatching, indentOnInput, syntaxHighlighting } from "@codemirror/language";
-import { highlightSelectionMatches, openSearchPanel, search } from "@codemirror/search";
+import {
+  closeSearchPanel,
+  highlightSelectionMatches,
+  openSearchPanel,
+  search,
+  searchPanelOpen,
+  setSearchQuery,
+} from "@codemirror/search";
 import { invoke } from "./ipc";
 import { state } from "./state";
 import { isLangId, LANGS } from "./langs";
@@ -36,6 +43,48 @@ import type { BufferSnapshot, LangId, Session } from "./types";
 function activeLineExt(): Extension {
   if (!state.settings.activeLine) return [];
   return [highlightActiveLine(), highlightActiveLineGutter()];
+}
+
+/** Find-as-you-type: as the query changes in the find panel, jump the selection
+    to the first match at/after where the panel was opened (wrapping to the top),
+    instead of waiting for Enter. The find input keeps focus — only the editor's
+    selection + scroll move. */
+function incrementalSearch(): Extension {
+  let anchor = 0;
+  let wasOpen = false;
+  return EditorView.updateListener.of((update) => {
+    const open = searchPanelOpen(update.state);
+    // Remember the cursor position the moment the panel opens, so typing more
+    // characters keeps searching from there rather than skipping ahead.
+    if (open && !wasOpen) anchor = update.startState.selection.main.from;
+    wasOpen = open;
+    if (!open) return;
+    for (const tr of update.transactions) {
+      const eff = tr.effects.find((e) => e.is(setSearchQuery));
+      if (!eff) continue;
+      const query = eff.value;
+      if (!query.valid) continue; // empty or invalid regexp → nothing to jump to
+      const at = anchor <= update.state.doc.length ? anchor : 0;
+      // NB: a SearchCursor that finds nothing reports done=true but leaves its
+      // `value` at the initial {0,0} — so check `done`, don't lean on `value`.
+      const firstFrom = (from: number, to?: number) => {
+        const r = query.getCursor(update.state, from, to).next();
+        return r.done ? null : r.value;
+      };
+      const hit = firstFrom(at) ?? firstFrom(0, at); // at/after anchor, else wrap to top
+      if (!hit) continue;
+      const { from, to } = hit;
+      const view = update.view;
+      // Can't dispatch during an update; defer a microtask.
+      queueMicrotask(() =>
+        view.dispatch({
+          selection: { anchor: from, head: to },
+          scrollIntoView: true,
+          userEvent: "select.search",
+        })
+      );
+    }
+  });
 }
 
 /** Editor font as a CM theme. The visual styling also exists in styles.css via
@@ -61,6 +110,17 @@ interface Buf {
   language: LangId;
   state: EditorState;
   scrollTop: number;
+  /** See BufferSnapshot: pinned display name, its pin flag, and the linked file. */
+  bufferName: string;
+  namePinned: boolean;
+  filePath: string;
+}
+
+/** Optional metadata to seed a new buffer with (import: name + pinned + path). */
+export interface BufMeta {
+  bufferName?: string;
+  namePinned?: boolean;
+  filePath?: string;
 }
 
 export interface EditorHost {
@@ -132,6 +192,12 @@ export class Editor {
       overlayScrollbar,
       this.fontComp.of(fontTheme()),
       search({ top: true }),
+      incrementalSearch(),
+      // Esc closes the find panel. CM only provides this via searchKeymap (whose
+      // other keys would clash with Buffers' own shortcuts), so bind just Esc — in
+      // the search-panel scope so it fires while the find input is focused, and in
+      // the editor scope for when focus is back in the text.
+      keymap.of([{ key: "Escape", run: closeSearchPanel, scope: "editor search-panel" }]),
       syntaxHighlighting(highlight),
       keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
       this.langComp.of(syntax ?? []),
@@ -162,11 +228,21 @@ export class Editor {
 
   // ---- buffer lifecycle ---------------------------------------------------------
 
-  /** Create a new empty buffer and activate it. Returns its id. */
-  newBuffer(text = "", language?: LangId): number {
+  /** Create a new empty buffer and activate it. Returns its id. `meta` seeds the
+      name/pin/path (used by import). Defaults: name empty (follows first line),
+      not pinned, no file. */
+  newBuffer(text = "", language?: LangId, meta?: BufMeta): number {
     const id = this.nextId++;
     const lang = language ?? state.settings.defaultLanguage;
-    this.bufs.set(id, { id, language: lang, state: this.mkState(text, lang), scrollTop: 0 });
+    this.bufs.set(id, {
+      id,
+      language: lang,
+      state: this.mkState(text, lang),
+      scrollTop: 0,
+      bufferName: meta?.bufferName ?? "",
+      namePinned: meta?.namePinned ?? false,
+      filePath: meta?.filePath ?? "",
+    });
     this.order.push(id);
     this.activate(id);
     this.schedule();
@@ -198,6 +274,9 @@ export class Editor {
       language: snap.language,
       state: this.mkState(snap.text, snap.language, snap.anchor, snap.head),
       scrollTop: snap.scrollTop,
+      bufferName: snap.bufferName ?? "",
+      namePinned: snap.namePinned ?? false,
+      filePath: snap.filePath ?? "",
     });
     this.order.push(id);
     this.activate(id);
@@ -266,16 +345,85 @@ export class Editor {
     return this.closed.length > 0;
   }
 
-  /** Tab title: the buffer's first non-empty line ("untitled" when blank). */
+  /** Display name (tab / sidebar). A set `bufferName` wins (pinned name, or a
+      file's name); otherwise it follows the first non-empty line, capped at 32
+      chars ("untitled" when blank). */
   title(id: number): string {
+    const buf = this.bufs.get(id);
+    if (buf?.bufferName) return buf.bufferName;
+    return this.firstLineName(id);
+  }
+
+  /** The name derived from the first non-empty line (first 32 chars). */
+  private firstLineName(id: number): string {
     const doc = this.docOf(id);
     if (!doc) return "untitled";
-    const lines = Math.min(doc.lines, 20); // don't scan huge docs for a title
+    const lines = Math.min(doc.lines, 20); // don't scan huge docs for a name
     for (let i = 1; i <= lines; i++) {
       const line = doc.line(i).text.trim();
-      if (line) return line.length > 60 ? line.slice(0, 60) + "…" : line;
+      if (line) return line.length > 32 ? line.slice(0, 32) + "…" : line;
     }
     return "untitled";
+  }
+
+  // ---- name / file metadata ----------------------------------------------------
+
+  /** Name/pin/file state for the given buffer (active by default), for the UI. */
+  meta(id = this.activeId): { name: string; pinned: boolean; filePath: string } {
+    const buf = this.bufs.get(id);
+    return {
+      name: this.title(id),
+      pinned: !!buf?.namePinned,
+      filePath: buf?.filePath ?? "",
+    };
+  }
+
+  /** Pin the current display name so it stops tracking the first line. */
+  pinName(id = this.activeId): void {
+    const buf = this.bufs.get(id);
+    if (!buf) return;
+    buf.bufferName = this.title(id); // freeze whatever's shown now
+    buf.namePinned = true;
+    this.schedule();
+    this.host.titlesChanged();
+  }
+
+  /** Unpin: clear the frozen name so it follows the first line again. */
+  unpinName(id = this.activeId): void {
+    const buf = this.bufs.get(id);
+    if (!buf) return;
+    buf.bufferName = "";
+    buf.namePinned = false;
+    this.schedule();
+    this.host.titlesChanged();
+  }
+
+  /** Link the buffer to a file: pin its name to the file name and remember the
+      path (import, and save-as). */
+  setFileInfo(id: number, name: string, path: string): void {
+    const buf = this.bufs.get(id);
+    if (!buf) return;
+    buf.bufferName = name;
+    buf.namePinned = true;
+    buf.filePath = path;
+    this.schedule();
+    this.host.titlesChanged();
+  }
+
+  /** The id of an open buffer linked to `path`, or null — so opening a file that's
+      already open just switches to it instead of duplicating it. */
+  idForPath(path: string): number | null {
+    for (const buf of this.bufs.values()) if (buf.filePath && buf.filePath === path) return buf.id;
+    return null;
+  }
+
+  /** Drop the file link (name/pin stay); ⌘S will prompt for a location again. */
+  unlink(id = this.activeId): void {
+    const buf = this.bufs.get(id);
+    if (!buf) return;
+    buf.filePath = "";
+    this.schedule();
+    this.host.statusChanged();
   }
 
   private docOf(id: number) {
@@ -395,6 +543,9 @@ export class Editor {
       anchor: sel.anchor,
       head: sel.head,
       scrollTop: buf.id === this.activeId ? this.view.scrollDOM.scrollTop : buf.scrollTop,
+      bufferName: buf.bufferName,
+      namePinned: buf.namePinned,
+      filePath: buf.filePath,
     };
   }
 
@@ -444,6 +595,9 @@ export class Editor {
         language: lang,
         state: this.mkState(raw.text, lang, raw.anchor ?? 0, raw.head ?? 0),
         scrollTop: typeof raw.scrollTop === "number" ? raw.scrollTop : 0,
+        bufferName: typeof raw.bufferName === "string" ? raw.bufferName : "",
+        namePinned: raw.namePinned === true,
+        filePath: typeof raw.filePath === "string" ? raw.filePath : "",
       });
       this.order.push(id);
       if (raw.id === s?.activeId) activate = id;

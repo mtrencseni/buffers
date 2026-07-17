@@ -35,8 +35,39 @@ fn show_main_window(window: tauri::WebviewWindow) {
     let _ = window.set_focus();
 }
 
+/// A file path passed on the command line at first launch (Delight's F4 → "open
+/// this file in Buffers"). The frontend fetches it once on startup and imports it.
+struct StartupFile(std::sync::Mutex<Option<String>>);
+
+/// The first non-flag command-line argument, if it looks like a file to open.
+fn file_arg(argv: &[String]) -> Option<String> {
+    argv.iter()
+        .skip(1) // argv[0] is the executable
+        .find(|a| !a.starts_with('-'))
+        .cloned()
+}
+
+/// Return (and clear) the startup file path, if any. Called once by the frontend
+/// on init; subsequent files arrive via the "open-file" event (single-instance).
+#[tauri::command]
+fn take_open_file(state: tauri::State<StartupFile>) -> Option<String> {
+    state.0.lock().ok().and_then(|mut g| g.take())
+}
+
 pub fn run() {
     tauri::Builder::default()
+        // Must be the FIRST plugin. A second launch (e.g. Delight's F4) fires this
+        // in the already-running instance: open its file and focus the window.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            use tauri::{Emitter, Manager};
+            if let Some(path) = file_arg(&argv) {
+                let _ = app.emit("open-file", path);
+            }
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         // Remembers window size/position across launches (see first-run sizing below).
         // VISIBLE is excluded: restoring it would show the window during setup,
@@ -60,6 +91,7 @@ pub fn run() {
             devtools::toggle_devtools,
             devtools::close_devtools,
             show_main_window,
+            take_open_file,
         ])
         .on_window_event(|window, event| match event {
             // The window-state plugin only persists on a clean exit; that never
@@ -79,6 +111,11 @@ pub fn run() {
         .setup(|app| {
             use tauri::Manager;
             menu::install(app.handle())?;
+
+            // Stash a file path passed at first launch for the frontend to pick up.
+            app.manage(StartupFile(std::sync::Mutex::new(file_arg(
+                &std::env::args().collect::<Vec<_>>(),
+            ))));
 
             // First launch (no saved window state yet): open at 80% of the
             // screen, centered. Later launches are restored by the plugin.

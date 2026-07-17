@@ -98,6 +98,7 @@ export type LangId =
   | "dockerfile"
   | "cmake"
   | "vb"
+  | "tla"
   | "diff";
 
 interface Lang {
@@ -108,6 +109,71 @@ interface Lang {
 }
 
 const stream = (mode: Parameters<typeof StreamLanguage.define>[0]) => () => StreamLanguage.define(mode);
+
+// TLA+ (Leslie Lamport's spec language) — no CM6/legacy mode exists, so a small
+// stream tokenizer: keywords, `\* line` and nesting `(* block *)` comments,
+// strings, numbers, the `---- MODULE … ----` / `====` delimiters, and the many
+// ASCII/backslash operators. Also covers TLC `.cfg` model files (superset of
+// their keywords). Token names map to highlight tags via StreamLanguage.
+const TLA_KEYWORDS = new Set(
+  (
+    "MODULE EXTENDS INSTANCE WITH LOCAL CONSTANT CONSTANTS VARIABLE VARIABLES " +
+    "ASSUME ASSUMPTION AXIOM THEOREM LEMMA PROPOSITION COROLLARY PROOF BY DEF DEFS " +
+    "OBVIOUS OMITTED QED HAVE TAKE WITNESS PICK SUFFICES NEW HIDE USE RECURSIVE " +
+    "LET IN IF THEN ELSE CASE OTHER CHOOSE ENABLED UNCHANGED SUBSET UNION DOMAIN " +
+    "EXCEPT LAMBDA STATE ACTION TEMPORAL " +
+    "SPECIFICATION INVARIANT INVARIANTS PROPERTY PROPERTIES INIT NEXT CONSTRAINT " +
+    "CONSTRAINTS ACTION_CONSTRAINT SYMMETRY VIEW CHECK_DEADLOCK ALIAS POSTCONDITION"
+  ).split(" ")
+);
+const TLA_ATOMS = new Set("TRUE FALSE BOOLEAN STRING".split(" "));
+
+const tlaMode = {
+  startState() {
+    return { comment: 0 };
+  },
+  token(stream: any, state: { comment: number }): string | null {
+    if (state.comment > 0) {
+      while (!stream.eol()) {
+        if (stream.match("(*")) {
+          state.comment++;
+          continue;
+        }
+        if (stream.match("*)")) {
+          state.comment--;
+          if (state.comment === 0) break;
+          continue;
+        }
+        stream.next();
+      }
+      return "comment";
+    }
+    if (stream.match("(*")) {
+      state.comment = 1;
+      return "comment";
+    }
+    if (stream.match("\\*")) {
+      stream.skipToEnd();
+      return "comment";
+    }
+    if (stream.eatSpace()) return null;
+    if (stream.match(/^(-{4,}|={4,})/)) return "meta"; // ---- MODULE … ----  /  ====
+    if (stream.match(/^"(?:[^"\\]|\\.)*"/)) return "string";
+    if (stream.match(/^\d+(\.\d+)?/)) return "number";
+    // Backslash operators (\in \A \E \cup …) — checked after \* line comments.
+    if (stream.match(/^\\[A-Za-z]+/) || stream.match(/^(\/\\|\\\/|=>|<=>|~>|\|->|\|=|::=|:=|==|->|<-|\[\]|<>|\.\.|>=|<=|#|=|<|>|\+|-|\*|\/|\^|~)/))
+      return "operator";
+    if (stream.match(/^[A-Za-z_][A-Za-z0-9_]*/)) {
+      const w = stream.current();
+      if (TLA_KEYWORDS.has(w)) return "keyword";
+      if (TLA_ATOMS.has(w)) return "atom";
+      if (/^(WF_|SF_)/.test(w)) return "keyword";
+      return "variable";
+    }
+    stream.next();
+    return null;
+  },
+};
 
 export const LANGS: Record<LangId, Lang> = {
   plain: { label: "Plain text", exts: ["txt", "text", "log", "me", "nfo"], syntax: () => null },
@@ -157,6 +223,10 @@ export const LANGS: Record<LangId, Lang> = {
   dockerfile: { label: "Dockerfile", exts: ["dockerfile"], syntax: stream(dockerFile) },
   cmake: { label: "CMake", exts: ["cmake"], syntax: stream(cmake) },
   vb: { label: "Visual Basic", exts: ["vb", "vbs", "bas"], syntax: stream(vb) },
+  // TLA+ specifications. TLC model configs (.cfg) stay with Properties above
+  // (that extension is generic); the TLA keyword set here also covers their words
+  // if you switch a .cfg to TLA+ by hand.
+  tla: { label: "TLA+", exts: ["tla"], syntax: stream(tlaMode) },
   diff: { label: "Diff", exts: ["diff", "patch"], syntax: stream(diff) },
 };
 

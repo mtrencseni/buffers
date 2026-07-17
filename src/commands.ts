@@ -66,7 +66,7 @@ export const COMMANDS: Command[] = [
 
   // Files
   { id: "importFile", label: "Import file into a buffer", group: "Files", defaults: [`${MOD}+KeyO`] },
-  { id: "exportFile", label: "Export buffer to a file", group: "Files", defaults: [`${MOD}+KeyS`] },
+  { id: "exportFile", label: "Save buffer to a file", group: "Files", defaults: [`${MOD}+KeyS`] },
 
   // Editing
   { id: "find", label: "Find", group: "Editing", defaults: [`${MOD}+KeyF`] },

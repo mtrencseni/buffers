@@ -50,6 +50,9 @@ class App {
   editorWrap = el("div", "tabview editorview");
   editorHost = el("div", "edhost");
   statusLeft = el("span", "statusinfo");
+  // Name-pin toggle + linked-file indicator/unlink, both live in the status bar.
+  pinBtn = el("button", "statusbtn");
+  fileEl = el("span", "filelink");
   langBtn = el("button", "langbtn");
   langPop: HTMLElement | null = null;
 
@@ -137,6 +140,17 @@ class App {
     // Native menu items route through the same handlers as the shortcuts.
     onEvent<string>("menu", (id) => this.commandHandlers[id as CommandId]?.());
 
+    // A file path handed to us at launch (Delight's F4 → "edit in Buffers"), or by
+    // a second launch while already running (single-instance → "open-file" event).
+    onEvent<string>("open-file", (path) => void this.openFile(path));
+    if (isTauri) {
+      void invoke<string | null>("take_open_file")
+        .then((p) => {
+          if (typeof p === "string" && p) void this.openFile(p);
+        })
+        .catch(() => {});
+    }
+
     // Drop files onto the window → import each into a new buffer (like ⌘O).
     this.setupFileDrop();
 
@@ -203,7 +217,7 @@ class App {
     };
     this.actionsEl.append(
       action("importFile", icons.importFile, "Import file"),
-      action("exportFile", icons.exportFile, "Export buffer"),
+      action("exportFile", icons.exportFile, "Save buffer to a file"),
       action("closeTab", icons.closeBuffer, "Close buffer"),
       action("find", icons.search, "Find"),
       action("replace", icons.replace, "Find & replace")
@@ -228,7 +242,26 @@ class App {
       e.stopPropagation();
       this.toggleLangPop();
     });
-    statusBar.append(this.statusLeft, this.langBtn);
+    // Name pin toggle: freeze the name (or let it follow the first line again).
+    this.pinBtn.innerHTML = icons.pin;
+    this.pinBtn.addEventListener("click", () => {
+      if (this.editor.meta().pinned) this.editor.unpinName();
+      else this.editor.pinName();
+      this.syncStatus();
+      this.renderTabstrip();
+    });
+    // Linked-file indicator: <link icon><file name><unlink ✕>. Hidden when unlinked.
+    const linkIcon = el("span", "filelink-icon");
+    linkIcon.innerHTML = icons.link;
+    const unlinkBtn = el("button", "filelink-unlink");
+    unlinkBtn.innerHTML = icons.close;
+    unlinkBtn.title = "Unlink file — the next save will ask where";
+    unlinkBtn.addEventListener("click", () => {
+      this.editor.unlink();
+      this.syncStatus();
+    });
+    this.fileEl.append(linkIcon, el("span", "filelink-path"), unlinkBtn);
+    statusBar.append(this.statusLeft, this.fileEl, this.pinBtn, this.langBtn);
     this.editorWrap.append(this.editorHost, statusBar);
     this.editorWrap.classList.add("active");
     this.contentEl.append(this.editorWrap);
@@ -404,6 +437,7 @@ class App {
     this.editor.activate(id);
     this.showView();
     this.syncActiveTabClass();
+    this.syncStatus(); // reflect this buffer's name-pin + linked file
   }
 
   private showBuffers(): void {
@@ -682,6 +716,20 @@ class App {
     if (s.selected > 0) parts.push(`${s.selected.toLocaleString()} selected`);
     this.statusLeft.textContent = parts.join("  ·  ");
     this.langBtn.textContent = LANGS[this.editor.language()].label;
+
+    // Name pin + linked file.
+    const m = this.editor.meta();
+    this.pinBtn.classList.toggle("on", m.pinned);
+    this.pinBtn.title = (m.pinned ? "Name pinned — click to follow the first line" : "Pin the name") ;
+    if (m.filePath) {
+      const name = m.filePath.split(/[\\/]/).filter(Boolean).pop() || m.filePath;
+      const label = this.fileEl.querySelector<HTMLElement>(".filelink-path");
+      if (label) label.textContent = name;
+      this.fileEl.title = m.filePath;
+      this.fileEl.classList.remove("hidden");
+    } else {
+      this.fileEl.classList.add("hidden");
+    }
   }
 
   private toggleLangPop(): void {
@@ -732,12 +780,31 @@ class App {
   }
 
   /** Read each path into its own new buffer — shared by ⌘O import and file drop. */
+  /** Open one file (Delight's F4): switch to it if it's already open here,
+      otherwise import it as a linked buffer. */
+  private async openFile(path: string): Promise<void> {
+    const existing = this.editor.idForPath(path);
+    if (existing != null) {
+      this.showBuffers();
+      this.activateBuffer(existing);
+      this.renderTabstrip();
+      return;
+    }
+    await this.openPaths([path]);
+  }
+
   private async openPaths(paths: string[]): Promise<void> {
     let opened = 0;
     for (const path of paths) {
       try {
         const text = await invoke<string>("read_file", { path });
-        this.editor.newBuffer(text, langForFilename(path));
+        const name = path.split(/[\\/]/).filter(Boolean).pop() || path;
+        // Imported buffers are linked to their file, name pinned to the file name.
+        this.editor.newBuffer(text, langForFilename(path), {
+          bufferName: name,
+          namePinned: true,
+          filePath: path,
+        });
         opened++;
       } catch (e) {
         toast(String(e));
@@ -746,7 +813,8 @@ class App {
     if (!opened) return;
     this.showBuffers();
     this.renderTabstrip();
-    toast(opened === 1 ? "Imported — the buffer is now on its own" : `Imported ${opened} files`);
+    this.syncStatus();
+    toast(opened === 1 ? "Imported" : `Imported ${opened} files`);
   }
 
   /** Native OS file drop onto the window → import the dropped files (Tauri only). */
@@ -763,25 +831,37 @@ class App {
 
   private async exportFile(): Promise<void> {
     if (!isTauri) {
-      toast("Export needs the native app");
+      toast("Saving needs the native app");
       return;
     }
-    const { save } = await import("@tauri-apps/plugin-dialog");
-    const lang = this.editor.language();
-    const base =
-      this.editor
-        .title(this.editor.active())
-        .replace(/[/\\:*?"<>|]/g, "")
-        .trim()
-        .slice(0, 40) || "untitled";
-    const path = await save({
-      title: "Export buffer",
-      defaultPath: `${base}.${extForLang(lang)}`,
-    });
-    if (typeof path !== "string") return;
+    const id = this.editor.active();
+    const linked = this.editor.meta(id).filePath;
+    let path = linked;
+    // No linked file yet → ask where to save.
+    if (!path) {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const lang = this.editor.language();
+      const base =
+        this.editor
+          .title(id)
+          .replace(/[/\\:*?"<>|]/g, "")
+          .replace(/…$/, "")
+          .trim()
+          .slice(0, 40) || "untitled";
+      const chosen = await save({ title: "Save buffer", defaultPath: `${base}.${extForLang(lang)}` });
+      if (typeof chosen !== "string") return;
+      path = chosen;
+    }
     try {
       await invoke("write_file", { path, contents: this.editor.activeText() });
-      toast("Exported — the buffer stays a buffer");
+      // First save of an unlinked buffer: link it + pin the name to the file name.
+      if (!linked) {
+        const name = path.split(/[\\/]/).filter(Boolean).pop() || path;
+        this.editor.setFileInfo(id, name, path);
+        this.renderTabstrip();
+      }
+      this.syncStatus();
+      toast("Saved");
     } catch (e) {
       toast(String(e));
     }

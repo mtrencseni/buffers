@@ -40,6 +40,14 @@ export interface BufferSnapshot {
   anchor: number;
   head: number;
   scrollTop: number;
+  /** Display name. Empty ⇒ the name follows the buffer's first line. Set when the
+      name is pinned, or from the file name on import/save. */
+  bufferName?: string;
+  /** When true the name is frozen (no longer tracks the first line). */
+  namePinned?: boolean;
+  /** Full path of the linked file, or empty for an unsaved/unlinked buffer. When
+      set, ⌘S saves straight there; unlinking clears it so ⌘S prompts again. */
+  filePath?: string;
 }
 
 export interface Session {
