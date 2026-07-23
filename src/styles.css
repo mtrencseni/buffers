@@ -400,6 +400,42 @@ body.tab-dragging * {
   padding: 0.5rem;
 }
 
+/* Left mode: stack the editor-topbar strip above the editor, and drop the
+   content padding so the strip is flush to the top/edges (the editor card below
+   gets the inset back via its own margin). */
+.tabs-left .content {
+  flex-direction: column;
+  padding: 0;
+}
+
+/* The drag strip above the editor. Matches the sidebar head's band (same fill,
+   height and top inset) so the two top strips read as one continuous title bar. */
+.editor-topbar {
+  display: none; /* only present/shown in left mode */
+}
+
+.tabs-left .editor-topbar {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+  flex: none;
+  padding: 0.375rem 0.5rem;
+  min-height: 2rem;
+  background: var(--header);
+  border-bottom: 1px solid var(--border);
+}
+
+:root.native.mac .tabs-left .editor-topbar {
+  /* Align with the sidebar head (traffic lights sit over the sidebar, not here,
+     so no left inset — just match its taller macOS height). */
+  padding-top: 0.625rem;
+  min-height: 2.5rem;
+}
+
+.tabs-left .editorview {
+  margin: 0.5rem;
+}
+
 .tabview {
   flex: 1;
   display: none;

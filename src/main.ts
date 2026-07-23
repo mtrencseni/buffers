@@ -39,8 +39,12 @@ class App {
   newBtn = el("button", "tbtn");
   gearBtn = el("button", "tbtn");
   // The action toolbar (import / export / close / find / replace) — the buttons
-  // the native menu used to carry. Re-parented next to newBtn by applyTabsLayout.
+  // the native menu used to carry. Re-parented by applyTabsLayout: into the top
+  // tab bar (top mode) or a strip above the editor (left mode).
   actionsEl = el("div", "actions");
+  // Left-mode only: a strip above the editor that carries the action toolbar and
+  // doubles as a window-drag region (there's no top tab bar to grab by).
+  editorTopbar = el("div", "editor-topbar");
   // Top-tabs container and the left-sidebar container; only one is populated at a
   // time (see applyTabsLayout). The sidebar has a resize handle on its right edge.
   tabbar = el("div", "tabbar");
@@ -280,15 +284,22 @@ class App {
     const left = state.settings.tabsSide === "left";
     document.getElementById("app")!.classList.toggle("tabs-left", left);
     if (left) {
-      // Sidebar: the head is a left-justified toolbar — actions, then + at its end.
+      // Sidebar head: just + (new buffer). The action toolbar moves to a strip
+      // above the editor (below) — that strip is also the window-drag region.
       const head = el("div", "sidebar-head");
       head.setAttribute("data-tauri-drag-region", "");
-      head.append(this.actionsEl, this.newBtn);
+      head.append(this.newBtn);
       const controls = el("div", "sidebar-controls");
       controls.append(this.themeBtn, this.devBtn, this.gearBtn);
       this.sidebar.replaceChildren(head, this.tabsEl, this.sysTabsEl, controls, this.sidebarResize);
       this.sidebar.style.width = `${state.settings.sidebarWidth}px`;
       this.tabbar.replaceChildren();
+      // Strip above the editor: actions on the left, the rest is empty drag space
+      // to move the window (this layout has no top tab bar to grab).
+      this.editorTopbar.setAttribute("data-tauri-drag-region", "");
+      this.editorTopbar.replaceChildren(this.actionsEl);
+      if (this.editorTopbar.parentElement !== this.contentEl)
+        this.contentEl.prepend(this.editorTopbar);
     } else {
       // Top bar: tabs, +, then the actions — set off from + by a wider gap so they
       // read as a toolbar rather than more tab chrome. The spacer keeps them left.
@@ -305,6 +316,7 @@ class App {
         this.devBtn,
         this.gearBtn
       );
+      this.editorTopbar.remove();
       this.sidebar.replaceChildren();
       this.sidebar.style.width = "";
     }
