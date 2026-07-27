@@ -8,6 +8,7 @@ import { COMMANDS, mergeKeybindings, type CommandId } from "./commands";
 import { isMac } from "./platform";
 import { applyTheme, effectiveTheme, onThemeChange } from "./theme";
 import { toast } from "./toast";
+import { toggleKeyboardMap } from "./keyboardmap";
 import { icons } from "./icons";
 import { buildSettingsPage, type SettingsPage } from "./settingsPage";
 import { buildKeybindingsPage, type KeybindingsPage } from "./keybindingsPage";
@@ -35,6 +36,7 @@ class App {
   sysTabsEl = el("div", "systabs");
   contentEl = el("div", "content");
   themeBtn = el("button", "tbtn");
+  kbBtn = el("button", "tbtn");
   devBtn = el("button", "tbtn");
   newBtn = el("button", "tbtn");
   gearBtn = el("button", "tbtn");
@@ -128,6 +130,7 @@ class App {
         this.editor.openFind();
       },
       toggleWrap: () => this.toggleWrap(),
+      keyboardMap: () => toggleKeyboardMap(),
       zoomIn: () => this.zoomStep(1),
       zoomOut: () => this.zoomStep(-1),
       zoomReset: () => this.setZoom(state.settings.fontSize, true),
@@ -228,6 +231,10 @@ class App {
     );
 
     this.themeBtn.addEventListener("click", () => this.toggleTheme());
+
+    this.kbBtn.innerHTML = icons.keyboard;
+    this.kbBtn.title = "Keyboard map" + hint("keyboardMap");
+    this.kbBtn.addEventListener("click", () => toggleKeyboardMap());
     onThemeChange(() => this.syncThemeBtn());
 
     this.devBtn.innerHTML = icons.code;
@@ -290,7 +297,7 @@ class App {
       head.setAttribute("data-tauri-drag-region", "");
       head.append(this.newBtn);
       const controls = el("div", "sidebar-controls");
-      controls.append(this.themeBtn, this.devBtn, this.gearBtn);
+      controls.append(this.themeBtn, this.kbBtn, this.devBtn, this.gearBtn);
       this.sidebar.replaceChildren(head, this.tabsEl, this.sysTabsEl, controls, this.sidebarResize);
       this.sidebar.style.width = `${state.settings.sidebarWidth}px`;
       this.tabbar.replaceChildren();
@@ -313,6 +320,7 @@ class App {
         spacer,
         this.sysTabsEl,
         this.themeBtn,
+        this.kbBtn,
         this.devBtn,
         this.gearBtn
       );

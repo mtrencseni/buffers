@@ -3,16 +3,20 @@ import { MOD } from "./platform";
 
 // While editing a text field, these belong to the field (copy/cut/paste/select/
 // undo/redo) even though they carry a strong modifier — never hijack them.
-// Windows/Linux also spell redo Ctrl+Y.
-const NATIVE_EDIT = new Set([
-  `${MOD}+KeyC`,
-  `${MOD}+KeyX`,
-  `${MOD}+KeyV`,
-  `${MOD}+KeyA`,
-  `${MOD}+KeyZ`,
-  `${MOD}+Shift+KeyZ`,
-  "Ctrl+KeyY",
-]);
+// Windows/Linux also spell redo Ctrl+Y. Exported (with labels) because they're
+// real, usable shortcuts the keyboard map should show alongside the rebindable
+// commands — they just live in the editor rather than the command registry.
+export const NATIVE_EDIT_KEYS: { combo: string; label: string }[] = [
+  { combo: `${MOD}+KeyC`, label: "Copy" },
+  { combo: `${MOD}+KeyX`, label: "Cut" },
+  { combo: `${MOD}+KeyV`, label: "Paste" },
+  { combo: `${MOD}+KeyA`, label: "Select all" },
+  { combo: `${MOD}+KeyZ`, label: "Undo" },
+  { combo: `${MOD}+Shift+KeyZ`, label: "Redo" },
+  { combo: "Ctrl+KeyY", label: "Redo" },
+];
+
+const NATIVE_EDIT = new Set(NATIVE_EDIT_KEYS.map((k) => k.combo));
 
 export interface KeyboardConfig {
   /** Current combo → command lookup (rebuilt by the app when bindings change). */

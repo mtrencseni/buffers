@@ -35,11 +35,15 @@ export type CommandId =
   | "zoomIn"
   | "zoomOut"
   | "zoomReset"
+  | "keyboardMap"
   | "devtools";
 
 export interface Command {
   id: CommandId;
   label: string;
+  /** Compact label for the keyboard map, where a key is only so wide. The full
+      `label` still shows in the Shortcuts tab and as the key's tooltip. */
+  short?: string;
   group: string;
   /** Default bindings, as canonical combo strings (e.g. "Meta+KeyT"). */
   defaults: string[];
@@ -49,35 +53,36 @@ export const COMMANDS: Command[] = [
   // Tabs
   { id: "newTab", label: "New buffer", group: "Buffers", defaults: [`${MOD}+KeyT`, `${MOD}+KeyN`] },
   { id: "closeTab", label: "Close buffer", group: "Buffers", defaults: [`${MOD}+KeyW`] },
-  { id: "reopenTab", label: "Reopen closed buffer", group: "Buffers", defaults: [`${MOD}+Shift+KeyT`] },
+  { id: "reopenTab", label: "Reopen closed buffer", short: "Reopen", group: "Buffers", defaults: [`${MOD}+Shift+KeyT`] },
   { id: "nextTab", label: "Next buffer", group: "Buffers", defaults: [`${MOD}+Shift+BracketRight`, "Ctrl+Tab"] },
-  { id: "prevTab", label: "Previous buffer", group: "Buffers", defaults: [`${MOD}+Shift+BracketLeft`, "Ctrl+Shift+Tab"] },
-  { id: "cycleTab", label: "Cycle buffers", group: "Buffers", defaults: [`${MOD}+Backquote`] },
-  { id: "goTab1", label: "Go to buffer 1", group: "Buffers", defaults: [`${MOD}+Digit1`] },
-  { id: "goTab2", label: "Go to buffer 2", group: "Buffers", defaults: [`${MOD}+Digit2`] },
-  { id: "goTab3", label: "Go to buffer 3", group: "Buffers", defaults: [`${MOD}+Digit3`] },
-  { id: "goTab4", label: "Go to buffer 4", group: "Buffers", defaults: [`${MOD}+Digit4`] },
-  { id: "goTab5", label: "Go to buffer 5", group: "Buffers", defaults: [`${MOD}+Digit5`] },
-  { id: "goTab6", label: "Go to buffer 6", group: "Buffers", defaults: [`${MOD}+Digit6`] },
-  { id: "goTab7", label: "Go to buffer 7", group: "Buffers", defaults: [`${MOD}+Digit7`] },
-  { id: "goTab8", label: "Go to buffer 8", group: "Buffers", defaults: [`${MOD}+Digit8`] },
-  { id: "goLastTab", label: "Go to last buffer", group: "Buffers", defaults: [`${MOD}+Digit9`] },
-  { id: "openSettings", label: "Open settings", group: "Buffers", defaults: [`${MOD}+Comma`] },
+  { id: "prevTab", label: "Previous buffer", short: "Prev buffer", group: "Buffers", defaults: [`${MOD}+Shift+BracketLeft`, "Ctrl+Shift+Tab"] },
+  { id: "cycleTab", label: "Cycle buffers", short: "Cycle", group: "Buffers", defaults: [`${MOD}+Backquote`] },
+  { id: "goTab1", label: "Go to buffer 1", short: "Buffer 1", group: "Buffers", defaults: [`${MOD}+Digit1`] },
+  { id: "goTab2", label: "Go to buffer 2", short: "Buffer 2", group: "Buffers", defaults: [`${MOD}+Digit2`] },
+  { id: "goTab3", label: "Go to buffer 3", short: "Buffer 3", group: "Buffers", defaults: [`${MOD}+Digit3`] },
+  { id: "goTab4", label: "Go to buffer 4", short: "Buffer 4", group: "Buffers", defaults: [`${MOD}+Digit4`] },
+  { id: "goTab5", label: "Go to buffer 5", short: "Buffer 5", group: "Buffers", defaults: [`${MOD}+Digit5`] },
+  { id: "goTab6", label: "Go to buffer 6", short: "Buffer 6", group: "Buffers", defaults: [`${MOD}+Digit6`] },
+  { id: "goTab7", label: "Go to buffer 7", short: "Buffer 7", group: "Buffers", defaults: [`${MOD}+Digit7`] },
+  { id: "goTab8", label: "Go to buffer 8", short: "Buffer 8", group: "Buffers", defaults: [`${MOD}+Digit8`] },
+  { id: "goLastTab", label: "Go to last buffer", short: "Last buffer", group: "Buffers", defaults: [`${MOD}+Digit9`] },
+  { id: "openSettings", label: "Open settings", short: "Settings", group: "Buffers", defaults: [`${MOD}+Comma`] },
 
   // Files
-  { id: "importFile", label: "Import file into a buffer", group: "Files", defaults: [`${MOD}+KeyO`] },
-  { id: "exportFile", label: "Save buffer to a file", group: "Files", defaults: [`${MOD}+KeyS`] },
+  { id: "importFile", label: "Import file into a buffer", short: "Import", group: "Files", defaults: [`${MOD}+KeyO`] },
+  { id: "exportFile", label: "Save buffer to a file", short: "Save", group: "Files", defaults: [`${MOD}+KeyS`] },
 
   // Editing
-  { id: "find", label: "Find", group: "Editing", defaults: [`${MOD}+KeyF`] },
-  { id: "replace", label: "Find & replace", group: "Editing", defaults: [`${MOD}+Alt+KeyF`] },
+  { id: "find", label: "Find", short: "Find", group: "Editing", defaults: [`${MOD}+KeyF`] },
+  { id: "replace", label: "Find & replace", short: "Replace", group: "Editing", defaults: [`${MOD}+Alt+KeyF`] },
 
   // View
-  { id: "toggleWrap", label: "Toggle line wrap", group: "View", defaults: ["Alt+KeyZ"] },
-  { id: "zoomIn", label: "Bigger text", group: "View", defaults: [`${MOD}+Equal`, `${MOD}+NumpadAdd`] },
-  { id: "zoomOut", label: "Smaller text", group: "View", defaults: [`${MOD}+Minus`, `${MOD}+NumpadSubtract`] },
-  { id: "zoomReset", label: "Reset text size", group: "View", defaults: [`${MOD}+Digit0`, `${MOD}+Numpad0`] },
-  { id: "devtools", label: "Developer tools", group: "View", defaults: [`${MOD}+Alt+KeyI`] },
+  { id: "toggleWrap", label: "Toggle line wrap", short: "Wrap", group: "View", defaults: ["Alt+KeyZ"] },
+  { id: "zoomIn", label: "Bigger text", short: "Bigger", group: "View", defaults: [`${MOD}+Equal`, `${MOD}+NumpadAdd`] },
+  { id: "zoomOut", label: "Smaller text", short: "Smaller", group: "View", defaults: [`${MOD}+Minus`, `${MOD}+NumpadSubtract`] },
+  { id: "zoomReset", label: "Reset text size", short: "Reset", group: "View", defaults: [`${MOD}+Digit0`, `${MOD}+Numpad0`] },
+  { id: "keyboardMap", label: "Keyboard map", short: "Keys", group: "View", defaults: [`${MOD}+KeyK`] },
+  { id: "devtools", label: "Developer tools", short: "Dev tools", group: "View", defaults: [`${MOD}+Alt+KeyI`] },
 ];
 
 /** Group order for the Shortcuts tab (first-seen order in COMMANDS). */
