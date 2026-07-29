@@ -79,12 +79,15 @@ jobs:
           # is the same in every release — so the versioned copy is for
           # archives, and this one is what README links to.
           stable="Buffers-win_x64-portable.exe"
-          mkdir -p dist
-          cp "$src" "dist/$name"
-          cp "$src" "dist/$stable"
-          (cd dist && sha256sum "$name" > "$name.sha256" && sha256sum "$stable" > "$stable.sha256")
+          # Staged in its own directory, NOT dist/ — that's Vite's output folder
+          # (tauri.conf frontendDist = ../dist), so globbing dist/* would sweep
+          # index.html and the bundled assets into the release.
+          mkdir -p release-assets
+          cp "$src" "release-assets/$name"
+          cp "$src" "release-assets/$stable"
+          (cd release-assets && sha256sum "$name" > "$name.sha256" && sha256sum "$stable" > "$stable.sha256")
           echo "name=$name" >> "$GITHUB_OUTPUT"
-          ls -l dist
+          ls -l release-assets
 
       # A copy attached to the run itself, so a dry run (which publishes no
       # release) still leaves something downloadable. Short retention: this is a
@@ -93,7 +96,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.art.outputs.name }}
-          path: dist/*
+          path: release-assets/*
           retention-days: 7
 
       - name: Publish release
@@ -103,4 +106,4 @@ jobs:
           name: Buffers ${{ steps.v.outputs.version }}
           draft: true
           generate_release_notes: true
-          files: dist/*
+          files: release-assets/*
