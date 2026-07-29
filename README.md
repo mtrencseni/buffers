@@ -11,11 +11,21 @@ Buffers are the point: text that lives in tabs, not files. Nothing is ever
 
 ## Download
 
+[**⬇ macOS (Apple silicon)**](https://github.com/mtrencseni/buffers/releases/latest/download/Buffers-macos_arm64.dmg)
+— a `.dmg` disk image; drag the app to Applications. The link always points at
+the newest release.
+([checksum](https://github.com/mtrencseni/buffers/releases/latest/download/Buffers-macos_arm64.dmg.sha256)
+· [all releases](https://github.com/mtrencseni/buffers/releases))
+
 [**⬇ Windows (x64)**](https://github.com/mtrencseni/buffers/releases/latest/download/Buffers-win_x64-portable.exe)
 — no installer, just a single `.exe`. The link always points at the newest
 release.
 ([checksum](https://github.com/mtrencseni/buffers/releases/latest/download/Buffers-win_x64-portable.exe.sha256)
 · [all releases](https://github.com/mtrencseni/buffers/releases))
+
+> The macOS build is signed with a *self-signed* certificate, so Gatekeeper will
+> refuse it on any machine other than the one that built it — it isn't ready for
+> general installation yet. The Windows `.exe` is unsigned, so SmartScreen warns.
 
 ![Buffers](docs/screenshot.png)
 
