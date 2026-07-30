@@ -6,6 +6,11 @@ dist/
 src-tauri/target/
 src-tauri/gen/
 
+# Server: virtualenv, the shared secret, and the pushed buffers themselves.
+server/.venv/
+server/.env
+server/data/
+
 # OS cruft (both platforms, so neither has to see the other's).
 .DS_Store
 Thumbs.db
