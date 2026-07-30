@@ -67,6 +67,24 @@ function save(key: string, value: unknown): void {
   localStorage.setItem(key, JSON.stringify(value ?? null));
 }
 
+/** The Cloud store the stubs mutate. Seeded with a deliberately awkward name
+    (slash + em dash + non-ASCII) — the server never treats names as paths, so
+    neither should we. */
+const cloudStore: { name: string; language: string; text: string; pushed_at: number }[] = [
+  {
+    name: "path/with — slashes",
+    language: "plain",
+    text: "A curated Cloud entry. Nothing expires here; it leaves when deleted.\n",
+    pushed_at: Date.now() / 1000 - 3600,
+  },
+  {
+    name: "release checklist",
+    language: "markdown",
+    text: "# Release\n\n- [x] tag\n- [ ] notes\n",
+    pushed_at: Date.now() / 1000 - 7200,
+  },
+];
+
 export async function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   switch (cmd) {
     case "load_state":
@@ -89,6 +107,8 @@ export async function mockInvoke<T>(cmd: string, args?: Record<string, unknown>)
       return undefined as T;
     // Remote stubs: never reach the real server from the browser (it's
     // cross-origin and sends no CORS headers) — canned data drives the UI.
+    // cloud_push/cloud_delete mutate cloudStore below, so the Cloud half of the
+    // Remote tab behaves for real: overwrite-by-name, delete, refresh.
     case "machine_hostname":
       return "browser-mock" as T;
     case "remote_push":
@@ -100,6 +120,31 @@ export async function mockInvoke<T>(cmd: string, args?: Record<string, unknown>)
       return undefined as T;
     case "remote_ping":
       return undefined as T;
+    case "cloud_push": {
+      const name = String(args?.name ?? "");
+      if (!name) throw "HTTP 400 — a Cloud buffer needs a name";
+      const i = cloudStore.findIndex((b) => b.name === name);
+      const entry = {
+        name,
+        language: String(args?.language ?? "plain"),
+        text: String(args?.text ?? ""),
+        pushed_at: Date.now() / 1000,
+      };
+      const replaced = i >= 0;
+      if (replaced) cloudStore[i] = entry;
+      else cloudStore.push(entry);
+      console.log("[mock] cloud_push", name, replaced ? "(replaced)" : "(new)");
+      return { ok: true, name, replaced, buffers: cloudStore.length } as T;
+    }
+    case "cloud_delete": {
+      const name = String(args?.name ?? "");
+      const i = cloudStore.findIndex((b) => b.name === name);
+      // A missing name is NOT an error here: the Rust command maps the server's
+      // 404 to Ok (already gone is the outcome the caller wanted).
+      if (i >= 0) cloudStore.splice(i, 1);
+      console.log("[mock] cloud_delete", name, i >= 0 ? "(removed)" : "(already gone)");
+      return undefined as T;
+    }
     case "remote_fetch": {
       const now = Date.now() / 1000;
       const iso = (ago: number) => new Date((now - ago) * 1000).toISOString();
@@ -107,7 +152,15 @@ export async function mockInvoke<T>(cmd: string, args?: Record<string, unknown>)
         user: "mtrencseni",
         hosts: [
           {
+            host: "Cloud",
+            kind: "cloud",
+            received_at: cloudStore.reduce((t, b) => Math.max(t, b.pushed_at), 0),
+            received_iso: iso(0),
+            buffers: cloudStore.map((b) => ({ ...b })),
+          },
+          {
             host: "work-laptop",
+            kind: "host",
             received_at: now - 300,
             received_iso: iso(300),
             buffers: [
@@ -125,6 +178,7 @@ export async function mockInvoke<T>(cmd: string, args?: Record<string, unknown>)
           },
           {
             host: "home-desktop",
+            kind: "host",
             received_at: now - 86400 * 2,
             received_iso: iso(86400 * 2),
             buffers: [

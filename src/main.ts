@@ -14,6 +14,9 @@ import { buildSettingsPage, type SettingsPage } from "./settingsPage";
 import { buildKeybindingsPage, type KeybindingsPage } from "./keybindingsPage";
 import { buildRemotePage, type RemotePage } from "./remotePage";
 import {
+  cloudConfigured,
+  cloudDelete,
+  cloudPush,
   fetchRemote,
   forcePush,
   HOST_RE,
@@ -24,6 +27,7 @@ import {
   schedulePush,
 } from "./remote";
 import { extForLang, isLangId, langForFilename, LANG_IDS, LANGS } from "./langs";
+import { buildLangPicker } from "./langpicker";
 
 type SysTab = "settings" | "keybindings" | "remote";
 
@@ -172,6 +176,7 @@ class App {
         if (state.settings.devTools) void invoke("toggle_devtools").catch(() => {});
       },
       openRemote: () => this.openSys("remote"),
+      pushCloud: () => void this.pushToCloud(),
       pushNow: () => {
         // A deliberate action deserves feedback either way (unlike the silent
         // automatic pushes) — forcePush resolves to "" on success.
@@ -281,6 +286,7 @@ class App {
     this.actionsEl.append(
       action("importFile", icons.importFile, "Import file"),
       action("exportFile", icons.exportFile, "Save buffer to a file"),
+      action("pushCloud", icons.cloudUp, "Push buffer to Cloud"),
       action("closeTab", icons.closeBuffer, "Close buffer"),
       action("find", icons.search, "Find"),
       action("replace", icons.replace, "Find & replace")
@@ -351,14 +357,29 @@ class App {
     const left = state.settings.tabsSide === "left";
     document.getElementById("app")!.classList.toggle("tabs-left", left);
     if (left) {
-      // Sidebar head: just + (new buffer). The action toolbar moves to a strip
-      // above the editor (below) — that strip is also the window-drag region.
+      // Sidebar head: empty on purpose — it's the window-drag strip, and on macOS
+      // the inset that keeps the traffic lights clear of the buffer list. The
+      // action toolbar lives above the editor (below); + sits under the list.
       const head = el("div", "sidebar-head");
       head.setAttribute("data-tauri-drag-region", "");
-      head.append(this.newBtn);
+      // + directly under the last buffer, centered across the sidebar.
+      const newRow = el("div", "sidebar-new");
+      newRow.append(this.newBtn);
+      // The list sizes to its content here, so the spacer (not the list) takes up
+      // the slack and keeps the system tabs and controls pinned to the bottom.
+      const spacer = el("div", "sidebar-space");
+      spacer.setAttribute("data-tauri-drag-region", "");
       const controls = el("div", "sidebar-controls");
       controls.append(this.themeBtn, this.kbBtn, this.cloudBtn, this.devBtn, this.gearBtn);
-      this.sidebar.replaceChildren(head, this.tabsEl, this.sysTabsEl, controls, this.sidebarResize);
+      this.sidebar.replaceChildren(
+        head,
+        this.tabsEl,
+        newRow,
+        spacer,
+        this.sysTabsEl,
+        controls,
+        this.sidebarResize
+      );
       this.sidebar.style.width = `${state.settings.sidebarWidth}px`;
       this.tabbar.replaceChildren();
       // Strip above the editor: actions on the left, the rest is empty drag space
@@ -750,11 +771,37 @@ class App {
         this.syncStatus();
       },
       openSettings: () => this.openSys("settings"),
+      deleteCloud: (name) => cloudDelete(name),
       status: () => remoteStatus,
     });
     wrap.append(page.el);
     this.contentEl.append(wrap);
     return { el: wrap, page };
+  }
+
+  /** ⌘⇧C / toolbar: put the ACTIVE buffer in the Cloud store under its current
+      display name. Same name overwrites; nothing else on the server is touched.
+      User-initiated, so both outcomes are toasted (the background machine push
+      stays silent by contrast). */
+  private async pushToCloud(): Promise<void> {
+    if (!cloudConfigured()) {
+      toast("No server configured — see Settings");
+      return;
+    }
+    const id = this.editor.active();
+    // The resolved title, NOT this.title(): lowercaseTabs is a display
+    // preference and must not rename what lands on the server.
+    const name = this.editor.title(id);
+    try {
+      const replaced = await cloudPush({
+        name,
+        language: this.editor.language(id),
+        text: this.editor.activeText(),
+      });
+      toast(replaced ? `Replaced on Cloud: ${name}` : `Pushed to Cloud: ${name}`);
+    } catch (e) {
+      toast(`Cloud push failed: ${e}`);
+    }
   }
 
   private rebuildComboMap(): void {
@@ -890,21 +937,24 @@ class App {
       this.closeLangPop();
       return;
     }
-    const pop = el("div", "droplist up");
-    for (const id of LANG_IDS) {
-      const item = el("button", "dropitem" + (this.editor.language() === id ? " on" : ""));
-      item.textContent = LANGS[id].label;
-      item.addEventListener("click", () => {
+    const picker = buildLangPicker({
+      current: this.editor.language(),
+      cls: "up", // the status bar sits at the bottom, so it opens upward
+      onPick: (id) => {
         this.editor.setLanguage(id);
         this.closeLangPop();
         this.syncStatus();
         this.editor.view.focus();
-      });
-      pop.append(item);
-    }
-    this.langBtn.parentElement!.append(pop);
-    this.langPop = pop;
+      },
+      onClose: () => {
+        this.closeLangPop();
+        this.editor.view.focus();
+      },
+    });
+    this.langBtn.parentElement!.append(picker.el);
+    this.langPop = picker.el;
     document.addEventListener("mousedown", this.onDocDown, true);
+    picker.focus();
   }
 
   private closeLangPop(): void {

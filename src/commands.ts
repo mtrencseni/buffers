@@ -29,6 +29,7 @@ export type CommandId =
   | "openSettings"
   | "importFile"
   | "exportFile"
+  | "pushCloud"
   | "find"
   | "replace"
   | "toggleWrap"
@@ -73,6 +74,9 @@ export const COMMANDS: Command[] = [
   // Files
   { id: "importFile", label: "Import file into a buffer", short: "Import", group: "Files", defaults: [`${MOD}+KeyO`] },
   { id: "exportFile", label: "Save buffer to a file", short: "Save", group: "Files", defaults: [`${MOD}+KeyS`] },
+  // Cloud is the curated store: this pushes ONE buffer by its current name,
+  // overwriting any Cloud entry of the same name. Nothing else is touched.
+  { id: "pushCloud", label: "Push buffer to Cloud", short: "Cloud", group: "Files", defaults: [`${MOD}+Shift+KeyC`] },
 
   // Editing
   { id: "find", label: "Find", short: "Find", group: "Editing", defaults: [`${MOD}+KeyF`] },

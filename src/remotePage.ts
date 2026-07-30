@@ -4,6 +4,11 @@
 //
 // Exactly two actions on a remote buffer, per the philosophy: copy its text,
 // or open it as a NEW local buffer. Nothing here ever writes back.
+//
+// The one exception is the Cloud host (kind === "cloud"): it's a curated store
+// rather than a machine mirror, so its entries only ever leave when deleted by
+// hand — hence the per-row ×, behind an inline confirm. Machine mirrors have no
+// delete: they self-correct on the owning machine's next push.
 
 import { EditorState } from "@codemirror/state";
 import { EditorView, lineNumbers } from "@codemirror/view";
@@ -22,6 +27,8 @@ export interface RemoteHooks {
   /** Open a remote buffer as a new LOCAL buffer (name pinned to "name (host)"). */
   openLocal(buf: RemoteBuffer, host: string): void;
   openSettings(): void;
+  /** Remove one Cloud buffer by name (Cloud hosts only). Resolves when gone. */
+  deleteCloud(name: string): Promise<void>;
   /** Push health, shown in the toolbar (the only place besides Settings). */
   status(): { lastPushAt: number; lastError: string };
 }
@@ -161,8 +168,52 @@ export function buildRemotePage(hooks: RemoteHooks): RemotePage {
     hostsEl.replaceChildren(frag);
   };
 
+  /** The × on a Cloud row. Deleting is destructive and can't be undone from the
+      app, so the first click only arms it: the × becomes a "Delete?" the user
+      must hit again. Anything else — a second thought, 4 s, another row — puts
+      it back. (The app has no modal system; this stays in the row.) */
+  const deleteControl = (name: string): HTMLElement => {
+    const wrap = el("span", "remote-del");
+    const x = el("span", "tabclose");
+    x.innerHTML = icons.close;
+    x.title = "Delete from Cloud";
+    // A span, not a button: the row itself is a <button> and nesting one inside
+    // another is invalid HTML. Same reason .tabclose is a span in main.ts.
+    const confirm = el("span", "remote-delconfirm", "Delete?");
+    confirm.title = "Permanently remove this buffer from the Cloud store";
+    wrap.append(x, confirm);
+    let armTimer = 0;
+    const disarm = () => {
+      window.clearTimeout(armTimer);
+      wrap.classList.remove("armed");
+    };
+    x.addEventListener("click", (e) => {
+      e.stopPropagation();
+      wrap.classList.add("armed");
+      window.clearTimeout(armTimer);
+      armTimer = window.setTimeout(disarm, 4000);
+    });
+    confirm.addEventListener("click", (e) => {
+      e.stopPropagation();
+      disarm();
+      void (async () => {
+        try {
+          await hooks.deleteCloud(name);
+          toast(`Deleted from Cloud: ${name}`);
+        } catch (err) {
+          toast(`Cloud delete failed: ${err}`);
+        }
+        // Refresh either way: on success to drop the row, on failure because the
+        // server is the truth — a 404 (already gone) resolves as success above.
+        await refresh();
+      })();
+    });
+    return wrap;
+  };
+
   const renderBuffers = () => {
     const host = currentHost();
+    const isCloud = host?.kind === "cloud"; // never match on the host's name
     const frag = document.createDocumentFragment();
     (host?.buffers ?? []).forEach((b, i) => {
       const row = el("button", "remote-row" + (i === selBuf ? " on" : ""));
@@ -170,7 +221,9 @@ export function buildRemotePage(hooks: RemoteHooks): RemotePage {
       const lang = isLangId(b.language) ? LANGS[b.language].label : b.language;
       const sub = el("div", "remote-rowsub", `${lang} · ${b.text.length.toLocaleString()} chars`);
       row.append(name, sub);
-      row.addEventListener("click", () => {
+      if (isCloud) row.append(deleteControl(b.name));
+      row.addEventListener("click", (e) => {
+        if ((e.target as HTMLElement).closest(".remote-del")) return; // the × owns its clicks
         selBuf = i;
         renderBuffers();
       });

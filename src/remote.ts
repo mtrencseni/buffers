@@ -36,6 +36,9 @@ export interface RemoteBuffer {
 
 export interface RemoteHost {
   host: string;
+  /** "cloud" = the curated Cloud store, "host" = a machine mirror. Trust this,
+      never the name — only Cloud entries may be deleted from here. */
+  kind?: "cloud" | "host";
   /** Unix seconds of the host's last push. */
   received_at: number;
   received_iso: string;
@@ -149,6 +152,40 @@ export async function fetchRemote(): Promise<RemoteData> {
     url: s.remoteUrl,
     user: s.remoteUser,
     token: s.remoteToken,
+  });
+}
+
+/** Whether a Cloud push can even be attempted (URL + user; a missing or wrong
+    token surfaces as the server's 401, which the caller toasts). */
+export function cloudConfigured(): boolean {
+  const s = state.settings;
+  return !!(s.remoteUrl && s.remoteUser);
+}
+
+/** Add or overwrite ONE Cloud buffer. Resolves to true when it replaced an
+    existing entry of the same name. Unlike the machine push this is
+    user-initiated, so the caller reports failures instead of swallowing them. */
+export async function cloudPush(buf: RemoteBuffer): Promise<boolean> {
+  const s = state.settings;
+  const res = await invoke<{ replaced?: boolean }>("cloud_push", {
+    url: s.remoteUrl,
+    user: s.remoteUser,
+    token: s.remoteToken,
+    name: buf.name,
+    language: buf.language,
+    text: buf.text,
+  });
+  return !!res?.replaced;
+}
+
+/** Remove ONE Cloud buffer by name. Already-gone (404) counts as done. */
+export async function cloudDelete(name: string): Promise<void> {
+  const s = state.settings;
+  await invoke<void>("cloud_delete", {
+    url: s.remoteUrl,
+    user: s.remoteUser,
+    token: s.remoteToken,
+    name,
   });
 }
 

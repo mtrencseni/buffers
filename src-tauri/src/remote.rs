@@ -67,6 +67,55 @@ pub async fn remote_push(
     ok_status(resp).map(|_| ())
 }
 
+/// POST one buffer to the Cloud store — the curated half of the server. Unlike
+/// a machine mirror this is add-or-overwrite by name: same name replaces, and
+/// nothing here ever expires. Returns the server's JSON so the caller can tell
+/// a fresh push from a replacement (`replaced`).
+#[tauri::command]
+pub async fn cloud_push(
+    url: String,
+    user: String,
+    token: String,
+    name: String,
+    language: String,
+    text: String,
+) -> Result<Value, String> {
+    let resp = client()?
+        .post(format!("{}/api/v1/{}/cloud", base(&url), user))
+        .header("X-Buffers-Token", token)
+        .json(&serde_json::json!({ "name": name, "language": language, "text": text }))
+        .send()
+        .await
+        .map_err(net_err)?;
+    ok_status(resp)?
+        .json::<Value>()
+        .await
+        .map_err(|e| e.without_url().to_string())
+}
+
+/// DELETE one Cloud buffer by name. Idempotent on purpose: a 404 means someone
+/// (or another machine) already removed it, which is the outcome the caller
+/// wanted — it re-fetches and sees it gone rather than showing an error.
+#[tauri::command]
+pub async fn cloud_delete(
+    url: String,
+    user: String,
+    token: String,
+    name: String,
+) -> Result<(), String> {
+    let resp = client()?
+        .delete(format!("{}/api/v1/{}/cloud", base(&url), user))
+        .header("X-Buffers-Token", token)
+        .json(&serde_json::json!({ "name": name }))
+        .send()
+        .await
+        .map_err(net_err)?;
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(());
+    }
+    ok_status(resp).map(|_| ())
+}
+
 /// GET every host's buffers, newest host first (the Remote tab's data).
 #[tauri::command]
 pub async fn remote_fetch(url: String, user: String, token: String) -> Result<Value, String> {
@@ -152,3 +201,5 @@ mod tests {
         assert_eq!(sanitize_host(&long).len(), 64);
     }
 }
+
+

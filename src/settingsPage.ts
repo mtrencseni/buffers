@@ -1,6 +1,7 @@
 import type { LangId, Settings, Theme } from "./types";
 import { FONT_MAX, FONT_MIN, hint } from "./state";
-import { LANG_IDS, LANGS } from "./langs";
+import { LANGS } from "./langs";
+import { buildLangPicker } from "./langpicker";
 import { icons } from "./icons";
 
 export interface SettingsHooks {
@@ -165,19 +166,22 @@ export function buildSettingsPage(hooks: SettingsHooks): SettingsPage {
       closeLangPop();
       return;
     }
-    langPop = el("div", "droplist");
-    for (const id of LANG_IDS) {
-      const item = el("button", "dropitem" + (hooks.get().defaultLanguage === id ? " on" : ""));
-      item.textContent = LANGS[id].label;
-      item.addEventListener("click", () => {
+    const picker = buildLangPicker({
+      current: hooks.get().defaultLanguage,
+      onPick: (id) => {
         hooks.onDefaultLanguage(id);
         closeLangPop();
         sync();
-      });
-      langPop.append(item);
-    }
+      },
+      onClose: () => {
+        closeLangPop();
+        langBtn.focus();
+      },
+    });
+    langPop = picker.el;
     langWrap.append(langPop);
     document.addEventListener("mousedown", onDocDown, true);
+    picker.focus();
   });
 
   const kbBtn = el("button", "linkbtn");

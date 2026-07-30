@@ -92,6 +92,8 @@ pub fn run() {
             devtools::toggle_devtools,
             devtools::close_devtools,
             remote::remote_push,
+            remote::cloud_push,
+            remote::cloud_delete,
             remote::remote_fetch,
             remote::remote_ping,
             remote::machine_hostname,
