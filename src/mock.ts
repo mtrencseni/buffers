@@ -87,6 +87,57 @@ export async function mockInvoke<T>(cmd: string, args?: Record<string, unknown>)
     case "toggle_devtools":
     case "close_devtools":
       return undefined as T;
+    // Remote stubs: never reach the real server from the browser (it's
+    // cross-origin and sends no CORS headers) — canned data drives the UI.
+    case "machine_hostname":
+      return "browser-mock" as T;
+    case "remote_push":
+      console.log(
+        "[mock] remote_push",
+        args?.host,
+        `${(args?.payload as { buffers?: unknown[] })?.buffers?.length ?? 0} buffers`
+      );
+      return undefined as T;
+    case "remote_ping":
+      return undefined as T;
+    case "remote_fetch": {
+      const now = Date.now() / 1000;
+      const iso = (ago: number) => new Date((now - ago) * 1000).toISOString();
+      return {
+        user: "mtrencseni",
+        hosts: [
+          {
+            host: "work-laptop",
+            received_at: now - 300,
+            received_iso: iso(300),
+            buffers: [
+              {
+                name: "Standup notes",
+                language: "markdown",
+                text: "# Standup notes\n\n- shipped the importer\n- next: the flaky test on CI\n",
+              },
+              {
+                name: "query.sql",
+                language: "sql",
+                text: "SELECT host, COUNT(*) AS buffers\nFROM sessions\nGROUP BY host\nORDER BY buffers DESC;\n",
+              },
+            ],
+          },
+          {
+            host: "home-desktop",
+            received_at: now - 86400 * 2,
+            received_iso: iso(86400 * 2),
+            buffers: [
+              {
+                name: "fib.py",
+                language: "python",
+                text: "def fib(n):\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a\n",
+              },
+            ],
+          },
+        ],
+      } as T;
+    }
     default:
       throw `unknown command ${cmd}`;
   }

@@ -23,6 +23,11 @@ export const state = {
     sidebarWidth: 200,
     defaultLanguage: "plain",
     devTools: false,
+    remoteUrl: "",
+    remoteUser: "mtrencseni",
+    remoteHost: "", // seeded from machine_hostname() at startup when empty
+    remoteToken: "",
+    remotePush: true,
   } as Settings,
   /** Current editor font size (⌘+/⌘− adjust; ⌘0 resets to settings.fontSize). */
   zoomSize: 13,

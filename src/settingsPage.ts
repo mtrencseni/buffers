@@ -16,6 +16,16 @@ export interface SettingsHooks {
   onDefaultLanguage(l: LangId): void;
   onDevTools(v: boolean): void;
   onOpenKeybindings(): void;
+  // Remote (server) — see remote.ts. The hooks validate; this page is dumb.
+  onRemoteUrl(v: string): void;
+  onRemoteUser(v: string): void;
+  onRemoteHost(v: string): void;
+  onRemoteToken(v: string): void;
+  onRemotePush(v: boolean): void;
+  /** Test the URL + token (a real authenticated GET); resolves to a message. */
+  remoteTest(): Promise<string>;
+  /** Push health for the status row. */
+  remoteStatus(): { lastPushAt: number; lastError: string };
 }
 
 export interface SettingsPage {
@@ -174,6 +184,50 @@ export function buildSettingsPage(hooks: SettingsHooks): SettingsPage {
   kbBtn.innerHTML = `${icons.keyboard}<span>Configure shortcuts</span>${icons.chevron}`;
   kbBtn.addEventListener("click", () => hooks.onOpenKeybindings());
 
+  // Remote: URL / user / host / token inputs (same commit-on-change/Enter
+  // pattern as the font input), a publish toggle, and a test button.
+  const makeText = (write: (v: string) => void, masked = false): HTMLInputElement => {
+    const input = el("input", "textinput") as HTMLInputElement;
+    input.spellcheck = false;
+    input.autocomplete = "off";
+    if (masked) input.type = "password";
+    const commit = () => {
+      write(input.value);
+      sync();
+    };
+    input.addEventListener("change", commit);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        commit();
+        input.blur();
+      }
+    });
+    return input;
+  };
+  const urlInput = makeText(hooks.onRemoteUrl);
+  urlInput.placeholder = "https://…  (empty = off)";
+  const userInput = makeText(hooks.onRemoteUser);
+  const hostInput = makeText(hooks.onRemoteHost);
+  const tokenInput = makeText(hooks.onRemoteToken, true);
+  const pushSw = makeSwitch(() => hooks.get().remotePush, hooks.onRemotePush);
+
+  const testWrap = el("div", "remote-test");
+  const testBtn = el("button", "kbreset", "Test connection");
+  const testMsg = el("span", "remote-testmsg");
+  testWrap.append(testBtn, testMsg);
+  testBtn.addEventListener("click", () => {
+    testBtn.disabled = true;
+    testMsg.textContent = "Testing…";
+    testMsg.classList.remove("err");
+    void hooks.remoteTest().then((msg) => {
+      testBtn.disabled = false;
+      testMsg.textContent = msg;
+      testMsg.classList.toggle("err", !msg.startsWith("OK"));
+    });
+  });
+
+  const statusEl = el("div", "sethint remote-pushstatus");
+
   section(
     "Appearance",
     row("Theme", "Light, dark, or follow the OS", seg),
@@ -194,6 +248,17 @@ export function buildSettingsPage(hooks: SettingsHooks): SettingsPage {
   section(
     "Keyboard",
     row("Keyboard shortcuts", "View and customize every key binding", kbBtn)
+  );
+
+  section(
+    "Remote",
+    row("Server URL", "Buffers server to publish to and read from", urlInput),
+    row("User", "Account name on the server", userInput),
+    row("This machine", "The name this machine publishes under", hostInput),
+    row("Token", "Shared secret (sent as X-Buffers-Token)", tokenInput),
+    row("Publish from this machine", "Push open buffers a few seconds after edits", pushSw),
+    row("Connection", "Checks the URL and token with a real request", testWrap),
+    statusEl
   );
 
   section(
@@ -218,6 +283,22 @@ export function buildSettingsPage(hooks: SettingsHooks): SettingsPage {
     if (document.activeElement !== fontInput) fontInput.value = s.fontFamily;
     val.textContent = `${s.fontSize}px`;
     langLabel.textContent = LANGS[s.defaultLanguage].label;
+    const remotePairs: [HTMLInputElement, string][] = [
+      [urlInput, s.remoteUrl],
+      [userInput, s.remoteUser],
+      [hostInput, s.remoteHost],
+      [tokenInput, s.remoteToken],
+    ];
+    for (const [input, value] of remotePairs) {
+      if (document.activeElement !== input) input.value = value;
+    }
+    setSwitch(pushSw, s.remotePush);
+    const st = hooks.remoteStatus();
+    const parts: string[] = [];
+    if (st.lastPushAt) parts.push(`Last push: ${new Date(st.lastPushAt).toLocaleTimeString()}`);
+    if (st.lastError) parts.push(`Last error: ${st.lastError}`);
+    statusEl.textContent = parts.join("  ·  ") || "No pushes yet this session.";
+    statusEl.classList.toggle("err", !!st.lastError);
   }
   sync();
 

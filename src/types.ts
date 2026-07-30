@@ -28,6 +28,14 @@ export interface Settings {
   defaultLanguage: LangId;
   /** Enable the Web Inspector (⌥⌘I). */
   devTools: boolean;
+  /** Base URL of the Buffers server. Empty disables remote entirely. */
+  remoteUrl: string;
+  remoteUser: string;
+  /** This machine's name on the server. Must match ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ */
+  remoteHost: string;
+  remoteToken: string;
+  /** Does this machine publish? Reading works either way. */
+  remotePush: boolean;
 }
 
 /** One scratch buffer (== one tab). Text lives in the CM state; this is the

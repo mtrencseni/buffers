@@ -37,6 +37,7 @@ import {
   selectionWhitespace,
   sublimeSelection,
 } from "./editor-core";
+import { bufferTitle } from "./title";
 import type { BufferSnapshot, LangId, Session } from "./types";
 
 /** Active-line highlight (line + gutter) for the current setting (empty = off). */
@@ -128,6 +129,9 @@ export interface EditorHost {
   titlesChanged(): void;
   /** Cursor moved / doc changed — refresh the status bar. */
   statusChanged(): void;
+  /** The session was just written to disk (flush() only fires on real changes).
+      The remote push piggybacks on this — see remote.ts. */
+  sessionFlushed?(s: Session): void;
 }
 
 const CLOSED_MAX = 10;
@@ -345,25 +349,15 @@ export class Editor {
     return this.closed.length > 0;
   }
 
-  /** Display name (tab / sidebar). A set `bufferName` wins (pinned name, or a
-      file's name); otherwise it follows the first non-empty line, capped at 32
-      chars ("untitled" when blank). */
+  /** Display name (tab / sidebar): the shared bufferTitle rule — a set
+      `bufferName` wins, else the first non-empty line (see title.ts). */
   title(id: number): string {
-    const buf = this.bufs.get(id);
-    if (buf?.bufferName) return buf.bufferName;
-    return this.firstLineName(id);
-  }
-
-  /** The name derived from the first non-empty line (first 32 chars). */
-  private firstLineName(id: number): string {
     const doc = this.docOf(id);
     if (!doc) return "untitled";
-    const lines = Math.min(doc.lines, 20); // don't scan huge docs for a name
-    for (let i = 1; i <= lines; i++) {
-      const line = doc.line(i).text.trim();
-      if (line) return line.length > 32 ? line.slice(0, 32) + "…" : line;
-    }
-    return "untitled";
+    // Only hand the rule the lines it may scan — never a whole huge doc
+    // (this runs on every keystroke via titlesChanged).
+    const prefix = doc.sliceString(0, doc.line(Math.min(doc.lines, 20)).to);
+    return bufferTitle(prefix, this.bufs.get(id)?.bufferName);
   }
 
   // ---- name / file metadata ----------------------------------------------------
@@ -549,7 +543,8 @@ export class Editor {
     };
   }
 
-  private session(): Session {
+  /** The full serialized session. Public for the manual push-now command. */
+  session(): Session {
     return {
       buffers: this.order
         .map((id) => this.bufs.get(id))
@@ -578,7 +573,9 @@ export class Editor {
     clearTimeout(this.idleTimer);
     clearTimeout(this.maxTimer);
     this.maxTimer = 0;
-    void invoke("save_buffers", { buffers: this.session() }).catch(() => {});
+    const s = this.session();
+    void invoke("save_buffers", { buffers: s }).catch(() => {});
+    this.host.sessionFlushed?.(s);
   }
 
   /** Restore the previous session (or start with one empty buffer). */

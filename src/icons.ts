@@ -35,4 +35,7 @@ export const icons = {
   replace: svg(
     '<circle cx="6.5" cy="6.5" r="3.75"/><path d="m9.4 9.4 1.4 1.4"/><path d="M9 13h4.5m-1.6-1.6L13.5 13l-1.6 1.6"/>'
   ),
+  // Cloud (the Remote tab): other machines' buffers live "up there".
+  cloud: svg('<path d="M11.4 12.5H5.9a3.4 3.4 0 1 1 .65-6.74 4 4 0 0 1 7.75 1.34 2.7 2.7 0 0 1-2.9 5.4Z"/>'),
+  copy: svg('<rect x="5.5" y="5.5" width="8" height="8" rx="1.2"/><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/>'),
 };

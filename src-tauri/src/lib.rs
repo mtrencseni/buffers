@@ -1,6 +1,7 @@
 mod devtools;
 mod files;
 mod menu;
+mod remote;
 mod store;
 
 /// macOS: when the window is activated (e.g. Cmd-Tab), WKWebView doesn't
@@ -90,6 +91,10 @@ pub fn run() {
             files::write_file,
             devtools::toggle_devtools,
             devtools::close_devtools,
+            remote::remote_push,
+            remote::remote_fetch,
+            remote::remote_ping,
+            remote::machine_hostname,
             show_main_window,
             take_open_file,
         ])

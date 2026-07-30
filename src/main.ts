@@ -12,9 +12,26 @@ import { toggleKeyboardMap } from "./keyboardmap";
 import { icons } from "./icons";
 import { buildSettingsPage, type SettingsPage } from "./settingsPage";
 import { buildKeybindingsPage, type KeybindingsPage } from "./keybindingsPage";
+import { buildRemotePage, type RemotePage } from "./remotePage";
+import {
+  fetchRemote,
+  forcePush,
+  HOST_RE,
+  initRemote,
+  remoteConfigured,
+  remoteStatus,
+  schedulePush,
+} from "./remote";
 import { extForLang, isLangId, langForFilename, LANG_IDS, LANGS } from "./langs";
 
-type SysTab = "settings" | "keybindings";
+type SysTab = "settings" | "keybindings" | "remote";
+
+/** Display titles for the system tabs (tab strip). */
+const SYS_TITLES: Record<SysTab, string> = {
+  settings: "Settings",
+  keybindings: "Shortcuts",
+  remote: "Remote",
+};
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -37,6 +54,7 @@ class App {
   contentEl = el("div", "content");
   themeBtn = el("button", "tbtn");
   kbBtn = el("button", "tbtn");
+  cloudBtn = el("button", "tbtn");
   devBtn = el("button", "tbtn");
   newBtn = el("button", "tbtn");
   gearBtn = el("button", "tbtn");
@@ -65,6 +83,7 @@ class App {
   editor!: Editor;
   settingsView: { el: HTMLElement; page: SettingsPage } | null = null;
   kbView: { el: HTMLElement; page: KeybindingsPage } | null = null;
+  remoteView: { el: HTMLElement; page: RemotePage } | null = null;
   /** Which system tab is showing, or null when a buffer tab is active. */
   activeSys: SysTab | null = null;
 
@@ -79,6 +98,18 @@ class App {
     this.restoreSettings(saved);
     state.keybindings = mergeKeybindings(saved?.keybindings);
 
+    // First run (or a cleared setting): name this machine after its hostname,
+    // pre-sanitized by the backend to the server's host charset.
+    if (!state.settings.remoteHost) {
+      try {
+        const h = await invoke<string>("machine_hostname");
+        if (h) {
+          state.settings.remoteHost = h;
+          persist();
+        }
+      } catch {}
+    }
+
     applyTheme(state.settings.theme);
     this.buildShell();
     this.applyFont();
@@ -86,6 +117,8 @@ class App {
     this.editor = new Editor(this.editorHost, {
       titlesChanged: () => this.syncTitles(),
       statusChanged: () => this.syncStatus(),
+      // Every real session write also queues a (longer-debounced) remote push.
+      sessionFlushed: (s) => schedulePush(s),
     });
     this.editor.restore(session);
     this.renderTabstrip();
@@ -137,6 +170,15 @@ class App {
       devtools: () => {
         if (state.settings.devTools) void invoke("toggle_devtools").catch(() => {});
       },
+      openRemote: () => this.openSys("remote"),
+      pushNow: () => {
+        // A deliberate action deserves feedback either way (unlike the silent
+        // automatic pushes) — forcePush resolves to "" on success.
+        this.editor.flush();
+        void forcePush(this.editor.session()).then((err) =>
+          toast(err ? `Push failed: ${err}` : "Pushed")
+        );
+      },
     };
     this.rebuildComboMap();
     initKeyboard({
@@ -163,6 +205,10 @@ class App {
 
     // Last-resort flush when the window goes away.
     window.addEventListener("pagehide", () => this.editor.flush());
+    // Remote's immediate-push triggers (blur/hidden/pagehide) — registered
+    // AFTER the editor's flush listeners so each flush queues the fresh
+    // payload before the push fires (same-event listeners run in order).
+    initRemote();
     requestAnimationFrame(() => this.fitTabTitles());
 
     // The window starts hidden (visible: false) so the webview's white default
@@ -193,6 +239,15 @@ class App {
         state.settings.sidebarWidth = clamp(s.sidebarWidth, SIDEBAR_MIN, SIDEBAR_MAX);
       if (isLangId(s.defaultLanguage)) state.settings.defaultLanguage = s.defaultLanguage;
       if (typeof s.devTools === "boolean") state.settings.devTools = s.devTools;
+      // Remote (GOTCHA: this allowlist is why new settings must be added here —
+      // anything missing silently fails to persist across restarts).
+      if (typeof s.remoteUrl === "string") state.settings.remoteUrl = s.remoteUrl.trim();
+      if (typeof s.remoteUser === "string" && s.remoteUser.trim())
+        state.settings.remoteUser = s.remoteUser.trim();
+      if (typeof s.remoteHost === "string" && HOST_RE.test(s.remoteHost))
+        state.settings.remoteHost = s.remoteHost;
+      if (typeof s.remoteToken === "string") state.settings.remoteToken = s.remoteToken;
+      if (typeof s.remotePush === "boolean") state.settings.remotePush = s.remotePush;
     }
     state.zoomSize =
       typeof saved?.zoomSize === "number"
@@ -236,6 +291,10 @@ class App {
     this.kbBtn.title = "Keyboard map" + hint("keyboardMap");
     this.kbBtn.addEventListener("click", () => toggleKeyboardMap());
     onThemeChange(() => this.syncThemeBtn());
+
+    this.cloudBtn.innerHTML = icons.cloud;
+    this.cloudBtn.title = "Remote buffers" + hint("openRemote");
+    this.cloudBtn.addEventListener("click", () => this.openSys("remote"));
 
     this.devBtn.innerHTML = icons.code;
     this.devBtn.title = "Developer tools" + hint("devtools");
@@ -297,7 +356,7 @@ class App {
       head.setAttribute("data-tauri-drag-region", "");
       head.append(this.newBtn);
       const controls = el("div", "sidebar-controls");
-      controls.append(this.themeBtn, this.kbBtn, this.devBtn, this.gearBtn);
+      controls.append(this.themeBtn, this.kbBtn, this.cloudBtn, this.devBtn, this.gearBtn);
       this.sidebar.replaceChildren(head, this.tabsEl, this.sysTabsEl, controls, this.sidebarResize);
       this.sidebar.style.width = `${state.settings.sidebarWidth}px`;
       this.tabbar.replaceChildren();
@@ -321,6 +380,7 @@ class App {
         this.sysTabsEl,
         this.themeBtn,
         this.kbBtn,
+        this.cloudBtn,
         this.devBtn,
         this.gearBtn
       );
@@ -405,12 +465,12 @@ class App {
     this.tabsEl.replaceChildren(frag);
 
     const sysFrag = document.createDocumentFragment();
-    for (const kind of ["settings", "keybindings"] as SysTab[]) {
-      const view = kind === "settings" ? this.settingsView : this.kbView;
+    for (const kind of ["settings", "keybindings", "remote"] as SysTab[]) {
+      const view = this.sysView(kind);
       if (!view) continue;
       const t = el("div", "tab" + (this.activeSys === kind ? " active" : ""));
       const title = el("span", "tabtitle");
-      title.textContent = kind === "settings" ? "Settings" : "Shortcuts";
+      title.textContent = SYS_TITLES[kind];
       const close = el("span", "tabclose");
       close.innerHTML = icons.close;
       t.append(title, close);
@@ -449,6 +509,7 @@ class App {
     const kinds: SysTab[] = [];
     if (this.settingsView) kinds.push("settings");
     if (this.kbView) kinds.push("keybindings");
+    if (this.remoteView) kinds.push("remote");
     sysEls.forEach((e, i) => e.classList.toggle("active", this.activeSys === kinds[i]));
   }
 
@@ -506,24 +567,32 @@ class App {
     this.editorWrap.classList.toggle("active", this.activeSys === null);
     this.settingsView?.el.classList.toggle("active", this.activeSys === "settings");
     this.kbView?.el.classList.toggle("active", this.activeSys === "keybindings");
+    this.remoteView?.el.classList.toggle("active", this.activeSys === "remote");
   }
 
-  // ---- system tabs (Settings / Shortcuts) --------------------------------------
+  // ---- system tabs (Settings / Shortcuts / Remote) ------------------------------
+
+  private sysView(kind: SysTab) {
+    if (kind === "settings") return this.settingsView;
+    if (kind === "keybindings") return this.kbView;
+    return this.remoteView;
+  }
 
   openSys(kind: SysTab): void {
     if (kind === "settings" && !this.settingsView) this.settingsView = this.buildSettings();
     if (kind === "keybindings" && !this.kbView) this.kbView = this.buildKeybindings();
+    if (kind === "remote" && !this.remoteView) this.remoteView = this.buildRemote();
     this.activeSys = kind;
-    (kind === "settings" ? this.settingsView : this.kbView)?.page.sync();
+    this.sysView(kind)?.page.sync();
     this.showView();
     this.renderTabstrip();
   }
 
   closeSys(kind: SysTab): void {
-    const view = kind === "settings" ? this.settingsView : this.kbView;
-    view?.el.remove();
+    this.sysView(kind)?.el.remove();
     if (kind === "settings") this.settingsView = null;
-    else this.kbView = null;
+    else if (kind === "keybindings") this.kbView = null;
+    else this.remoteView = null;
     if (this.activeSys === kind) {
       this.activeSys = null;
       this.showView();
@@ -587,6 +656,45 @@ class App {
         persist();
       },
       onOpenKeybindings: () => this.openSys("keybindings"),
+      onRemoteUrl: (v) => {
+        state.settings.remoteUrl = v.trim().replace(/\/+$/, "");
+        persist();
+      },
+      onRemoteUser: (v) => {
+        const t = v.trim();
+        if (t) state.settings.remoteUser = t;
+        persist();
+      },
+      onRemoteHost: (v) => {
+        const t = v.trim();
+        // Empty is allowed (disables pushing); anything else must fit the
+        // server's charset — it becomes a path component there.
+        if (t && !HOST_RE.test(t)) {
+          toast("Host may only use letters, digits, . _ -");
+          return;
+        }
+        state.settings.remoteHost = t;
+        persist();
+      },
+      onRemoteToken: (v) => {
+        state.settings.remoteToken = v.trim();
+        persist();
+      },
+      onRemotePush: (v) => {
+        state.settings.remotePush = v;
+        persist();
+      },
+      remoteTest: async () => {
+        if (!state.settings.remoteUrl) return "Set a server URL first";
+        try {
+          const d = await fetchRemote();
+          const n = d.hosts?.length ?? 0;
+          return `OK — ${n} host${n === 1 ? "" : "s"}`;
+        } catch (e) {
+          return String(e);
+        }
+      },
+      remoteStatus: () => remoteStatus,
     });
     wrap.append(page.el);
     this.contentEl.append(wrap);
@@ -618,6 +726,30 @@ class App {
         state.keybindings = mergeKeybindings(null);
         this.afterBindingsChanged();
       },
+    });
+    wrap.append(page.el);
+    this.contentEl.append(wrap);
+    return { el: wrap, page };
+  }
+
+  private buildRemote() {
+    const wrap = el("div", "tabview");
+    const page = buildRemotePage({
+      configured: () => remoteConfigured(),
+      fetch: () => fetchRemote(),
+      openLocal: (buf, host) => {
+        // A normal, editable, UNLINKED buffer — it will push under THIS
+        // machine's hostname like any other. The remote one is untouched.
+        this.editor.newBuffer(buf.text, isLangId(buf.language) ? buf.language : "plain", {
+          bufferName: `${buf.name} (${host})`,
+          namePinned: true,
+        });
+        this.showBuffers();
+        this.renderTabstrip();
+        this.syncStatus();
+      },
+      openSettings: () => this.openSys("settings"),
+      status: () => remoteStatus,
     });
     wrap.append(page.el);
     this.contentEl.append(wrap);

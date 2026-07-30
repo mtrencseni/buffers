@@ -1125,3 +1125,194 @@ body.tab-dragging * {
 .kbkey.is-builtin .kbkey-cmd {
   color: var(--text-dim);
 }
+
+/* ---------- remote tab ---------- */
+.remote {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.remote-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+
+.remote-bartext {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.remote-bartext.err {
+  color: var(--error-text);
+}
+
+.remote-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.remote-hosts,
+.remote-buffers {
+  width: 13rem;
+  flex: none;
+  overflow-y: auto;
+  padding: 0.375rem;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.remote-row {
+  text-align: left;
+  padding: 0.375rem 0.5rem;
+  border-radius: 0.375rem;
+  color: var(--text);
+  transition: background 0.12s ease;
+}
+
+.remote-row:hover {
+  background: var(--hover);
+}
+
+.remote-row.on {
+  background: var(--accent-soft);
+}
+
+.remote-rowname {
+  font-weight: 550;
+  font-size: 0.8125rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.remote-rowsub {
+  font-size: 0.6875rem;
+  color: var(--text-dim);
+  margin-top: 0.0625rem;
+}
+
+.remote-empty {
+  padding: 0.75rem 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-faint);
+}
+
+.remote-config {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.remote-preview {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.remote-previewhead {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+
+.remote-preview.blank .remote-previewhead {
+  visibility: hidden;
+}
+
+.remote-previewtitle {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.8125rem;
+  font-weight: 550;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-left: 0.25rem;
+}
+
+.remote-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3125rem;
+  flex: none;
+  padding: 0.25rem 0.5625rem;
+  border-radius: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 550;
+  color: var(--text-dim);
+  background: var(--panel-alt);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.remote-act:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.remote-act svg {
+  width: 0.8125rem;
+  height: 0.8125rem;
+}
+
+/* The read-only preview reuses the editor look (edhost + editor-core.css). */
+.remote-edhost {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.remote-edhost .cm-editor {
+  flex: 1;
+  height: 100%;
+}
+
+/* ---------- settings: remote section ---------- */
+.remote-test {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  min-width: 0;
+}
+
+.remote-testmsg {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 14rem;
+}
+
+.remote-testmsg.err {
+  color: var(--error-text);
+}
+
+.remote-pushstatus {
+  padding: 0.5rem 0 0;
+}
+
+.remote-pushstatus.err {
+  color: var(--error-text);
+}

@@ -36,7 +36,9 @@ export type CommandId =
   | "zoomOut"
   | "zoomReset"
   | "keyboardMap"
-  | "devtools";
+  | "devtools"
+  | "openRemote"
+  | "pushNow";
 
 export interface Command {
   id: CommandId;
@@ -83,6 +85,10 @@ export const COMMANDS: Command[] = [
   { id: "zoomReset", label: "Reset text size", short: "Reset", group: "View", defaults: [`${MOD}+Digit0`, `${MOD}+Numpad0`] },
   { id: "keyboardMap", label: "Keyboard map", short: "Keys", group: "View", defaults: [`${MOD}+KeyK`] },
   { id: "devtools", label: "Developer tools", short: "Dev tools", group: "View", defaults: [`${MOD}+Alt+KeyI`] },
+
+  // Remote
+  { id: "openRemote", label: "Remote buffers", short: "Remote", group: "Remote", defaults: [`${MOD}+Shift+KeyR`] },
+  { id: "pushNow", label: "Push buffers to the server", short: "Push", group: "Remote", defaults: [] },
 ];
 
 /** Group order for the Shortcuts tab (first-seen order in COMMANDS). */
