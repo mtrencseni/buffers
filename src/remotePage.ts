@@ -24,6 +24,9 @@ export interface RemoteHooks {
   /** Whether a server URL is configured at all. */
   configured(): boolean;
   fetch(): Promise<RemoteData>;
+  /** Last successful fetch from disk, shown until (or instead of) a live one. */
+  loadCache(): Promise<{ fetchedAt: number; data: RemoteData } | null>;
+  saveCache(data: RemoteData): void;
   /** Open a remote buffer as a new LOCAL buffer (name pinned to "name (host)"). */
   openLocal(buf: RemoteBuffer, host: string): void;
   openSettings(): void;
@@ -127,6 +130,11 @@ export function buildRemotePage(hooks: RemoteHooks): RemotePage {
   const view = new EditorView({ parent: edHost });
 
   let data: RemoteData | null = null;
+  /** Date.now() when `data` came off the server (0 = never). */
+  let fetchedAt = 0;
+  /** True when what's on screen predates this refresh — from the disk cache, or
+      a live fetch that has since failed. Drives the "cached, N ago" marker. */
+  let stale = false;
   let selHost = ""; // selected host's name (survives refreshes)
   let selBuf = 0;
   let loading = false;
@@ -139,6 +147,7 @@ export function buildRemotePage(hooks: RemoteHooks): RemotePage {
     const st = hooks.status();
     const parts: string[] = [];
     if (msg) parts.push(msg);
+    if (stale && fetchedAt) parts.push(`cached, ${ago(fetchedAt / 1000)}`);
     if (st.lastPushAt) parts.push(`pushed ${ago(st.lastPushAt / 1000)}`);
     if (st.lastError) parts.push(`⚠ ${st.lastError}`);
     barText.textContent = parts.join("  ·  ");
@@ -267,9 +276,28 @@ export function buildRemotePage(hooks: RemoteHooks): RemotePage {
       return;
     }
     loading = true;
+    // Put the cached snapshot up BEFORE the network call: offline, the fetch
+    // below just fails and this is the only thing the user gets to see.
+    if (!data) {
+      const c = await hooks.loadCache();
+      if (c) {
+        data = c.data;
+        fetchedAt = c.fetchedAt;
+        stale = true;
+        if (!currentHost()) {
+          selHost = data.hosts[0]?.host ?? "";
+          selBuf = 0;
+        }
+        renderHosts();
+        renderBuffers();
+      }
+    }
     syncBar("loading…");
     try {
       data = await hooks.fetch();
+      fetchedAt = Date.now();
+      stale = false;
+      hooks.saveCache(data);
       // Keep the selection if its host is still there; else take the newest.
       if (!currentHost()) {
         selHost = data.hosts[0]?.host ?? "";
@@ -278,7 +306,11 @@ export function buildRemotePage(hooks: RemoteHooks): RemotePage {
       selBuf = Math.min(selBuf, Math.max(0, (currentHost()?.buffers.length ?? 1) - 1));
       syncBar(`fetched just now · ${data.hosts.length} host${data.hosts.length === 1 ? "" : "s"}`);
     } catch (e) {
-      // Stale data (if any) stays on screen; the failure lives in the toolbar.
+      // Whatever is on screen stays there; the failure lives in the toolbar.
+      // Anything still showing is now demonstrably old, so mark it as cached —
+      // a fetched-at age beats a host row's "5 min ago", which is the server's
+      // last-received time and can look fresher than the data really is.
+      if (data) stale = true;
       syncBar(String(e));
     }
     loading = false;

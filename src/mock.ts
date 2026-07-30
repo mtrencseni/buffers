@@ -120,6 +120,19 @@ export async function mockInvoke<T>(cmd: string, args?: Record<string, unknown>)
       return undefined as T;
     case "remote_ping":
       return undefined as T;
+    // The remote cache stands in for .remote-cache.json; localStorage keeps it
+    // across reloads so the offline path can actually be exercised here.
+    case "load_remote_cache": {
+      try {
+        const raw = localStorage.getItem("mock-remote-cache");
+        return (raw ? JSON.parse(raw) : null) as T;
+      } catch {
+        return null as T;
+      }
+    }
+    case "save_remote_cache":
+      localStorage.setItem("mock-remote-cache", JSON.stringify(args?.cache ?? null));
+      return undefined as T;
     case "cloud_push": {
       const name = String(args?.name ?? "");
       if (!name) throw "HTTP 400 — a Cloud buffer needs a name";
@@ -146,6 +159,10 @@ export async function mockInvoke<T>(cmd: string, args?: Record<string, unknown>)
       return undefined as T;
     }
     case "remote_fetch": {
+      // Dev switch for the offline path: localStorage["mock-offline"] = "1"
+      // makes every fetch fail the way a plane does, so the Remote tab's cached
+      // rendering can actually be exercised in the browser.
+      if (localStorage.getItem("mock-offline")) throw "cannot reach the server";
       const now = Date.now() / 1000;
       const iso = (ago: number) => new Date((now - ago) * 1000).toISOString();
       return {

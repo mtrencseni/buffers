@@ -155,6 +155,35 @@ export async function fetchRemote(): Promise<RemoteData> {
   });
 }
 
+/** The last successful fetch, kept on disk so the Remote tab still shows
+    something with no network. A cache and nothing more: any successful fetch
+    replaces it wholesale, and it is never merged into local buffers. */
+export interface RemoteCache {
+  /** Date.now() when this snapshot came off the server. */
+  fetchedAt: number;
+  data: RemoteData;
+}
+
+export async function loadRemoteCache(): Promise<RemoteCache | null> {
+  try {
+    const c = await invoke<RemoteCache | null>("load_remote_cache");
+    // A hand-edited or half-written file must not take the tab down.
+    if (c && typeof c.fetchedAt === "number" && Array.isArray(c.data?.hosts)) return c;
+  } catch {
+    /* unreadable cache is simply no cache */
+  }
+  return null;
+}
+
+/** Fire-and-forget: a cache that fails to write costs nothing. */
+export async function saveRemoteCache(data: RemoteData): Promise<void> {
+  try {
+    await invoke("save_remote_cache", { cache: { fetchedAt: Date.now(), data } });
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Whether a Cloud push can even be attempted (URL + user; a missing or wrong
     token surfaces as the server's 401, which the caller toasts). */
 export function cloudConfigured(): boolean {

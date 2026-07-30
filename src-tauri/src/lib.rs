@@ -87,6 +87,8 @@ pub fn run() {
             store::save_state,
             store::load_buffers,
             store::save_buffers,
+            store::load_remote_cache,
+            store::save_remote_cache,
             files::read_file,
             files::write_file,
             devtools::toggle_devtools,

@@ -1,8 +1,12 @@
-//! Persistence: two JSON files in the app's own config dir.
-//! - settings.json     — app settings (schema lives in the frontend)
-//! - .buffers.json     — every open buffer (hot exit, Sublime-style)
-//! Both are written atomically (write-then-rename) so a crash mid-write can
-//! never corrupt them. Buffers itself only ever writes to these two files —
+//! Persistence: three JSON files in the app's own config dir.
+//! - settings.json      — app settings (schema lives in the frontend)
+//! - .buffers.json      — every open buffer (hot exit, Sublime-style)
+//! - .remote-cache.json — the last successful Remote fetch, so the Remote tab
+//!   still shows something offline. NOTE this is the one file holding text from
+//!   OTHER machines; everything else here is this machine's own. It is a cache,
+//!   never a source of truth — a successful fetch always replaces it wholesale.
+//! All are written atomically (write-then-rename) so a crash mid-write can
+//! never corrupt them. Buffers itself only ever writes to these three files —
 //! plus paths the user explicitly picks in an export dialog (files.rs).
 
 use serde_json::Value;
@@ -51,4 +55,14 @@ pub fn load_buffers(app: tauri::AppHandle) -> Result<Value, String> {
 #[tauri::command]
 pub fn save_buffers(app: tauri::AppHandle, buffers: Value) -> Result<(), String> {
     save(&app, ".buffers.json", &buffers)
+}
+
+#[tauri::command]
+pub fn load_remote_cache(app: tauri::AppHandle) -> Result<Value, String> {
+    load(&app, ".remote-cache.json")
+}
+
+#[tauri::command]
+pub fn save_remote_cache(app: tauri::AppHandle, cache: Value) -> Result<(), String> {
+    save(&app, ".remote-cache.json", &cache)
 }

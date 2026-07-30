@@ -19,11 +19,13 @@ import {
   cloudPush,
   fetchRemote,
   forcePush,
+  loadRemoteCache,
   HOST_RE,
   initRemote,
   normalizeRemoteUrl,
   remoteConfigured,
   remoteStatus,
+  saveRemoteCache,
   schedulePush,
 } from "./remote";
 import { extForLang, isLangId, langForFilename, LANG_IDS, LANGS } from "./langs";
@@ -759,6 +761,8 @@ class App {
     const page = buildRemotePage({
       configured: () => remoteConfigured(),
       fetch: () => fetchRemote(),
+      loadCache: () => loadRemoteCache(),
+      saveCache: (d) => void saveRemoteCache(d),
       openLocal: (buf, host) => {
         // A normal, editable, UNLINKED buffer — it will push under THIS
         // machine's hostname like any other. The remote one is untouched.
