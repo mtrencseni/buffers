@@ -17,6 +17,15 @@ import type { Session } from "./types";
 /** The server's host-name charset (a host becomes a path component there). */
 export const HOST_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
+/** Clean up a typed server URL: trim, drop trailing slashes, and assume https
+    when no scheme was given, so "buffers.example.com" just works. An explicit
+    scheme is left alone — typing http:// (or anything else) still means it. */
+export function normalizeRemoteUrl(v: string): string {
+  const t = v.trim().replace(/\/+$/, "");
+  if (!t) return "";
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(t) ? t : `https://${t}`;
+}
+
 /** One buffer as the server stores it. ONLY name/language/text ever leave the
     machine — no paths, ids, cursor state, or the closed stack. */
 export interface RemoteBuffer {

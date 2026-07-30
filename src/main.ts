@@ -18,6 +18,7 @@ import {
   forcePush,
   HOST_RE,
   initRemote,
+  normalizeRemoteUrl,
   remoteConfigured,
   remoteStatus,
   schedulePush,
@@ -241,7 +242,7 @@ class App {
       if (typeof s.devTools === "boolean") state.settings.devTools = s.devTools;
       // Remote (GOTCHA: this allowlist is why new settings must be added here —
       // anything missing silently fails to persist across restarts).
-      if (typeof s.remoteUrl === "string") state.settings.remoteUrl = s.remoteUrl.trim();
+      if (typeof s.remoteUrl === "string") state.settings.remoteUrl = normalizeRemoteUrl(s.remoteUrl);
       if (typeof s.remoteUser === "string" && s.remoteUser.trim())
         state.settings.remoteUser = s.remoteUser.trim();
       if (typeof s.remoteHost === "string" && HOST_RE.test(s.remoteHost))
@@ -657,7 +658,7 @@ class App {
       },
       onOpenKeybindings: () => this.openSys("keybindings"),
       onRemoteUrl: (v) => {
-        state.settings.remoteUrl = v.trim().replace(/\/+$/, "");
+        state.settings.remoteUrl = normalizeRemoteUrl(v);
         persist();
       },
       onRemoteUser: (v) => {
