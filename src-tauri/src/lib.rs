@@ -1,3 +1,4 @@
+mod ctxmenu;
 mod devtools;
 mod files;
 mod menu;
@@ -96,9 +97,11 @@ pub fn run() {
             remote::remote_push,
             remote::cloud_push,
             remote::cloud_delete,
+            remote::host_delete,
             remote::remote_fetch,
             remote::remote_ping,
             remote::machine_hostname,
+            ctxmenu::set_devmode,
             show_main_window,
             take_open_file,
         ])
@@ -149,6 +152,12 @@ pub fn run() {
                         let _ = win.center();
                     }
                 }
+            }
+
+            // Windows: prune the WebView2 context menu down to the edit
+            // commands (+ Inspect in Developer mode). No-op elsewhere.
+            if let Some(win) = app.get_webview_window("main") {
+                ctxmenu::install(&win);
             }
 
             // Failsafe for the hidden start: if the frontend dies before it can

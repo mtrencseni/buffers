@@ -267,7 +267,11 @@ export function buildSettingsPage(hooks: SettingsHooks): SettingsPage {
 
   section(
     "Advanced",
-    row("Enable developer tools", `Toggle the Web Inspector with ${hint("devtools")}`, devToolsSw)
+    row(
+      "Developer mode",
+      `Web Inspector (${hint("devtools")}) and the Inspect item in the right-click menu`,
+      devToolsSw
+    )
   );
 
   const setSwitch = (s: HTMLElement, on: boolean) => {

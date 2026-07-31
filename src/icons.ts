@@ -41,4 +41,6 @@ export const icons = {
     '<path d="M11.4 12.5H5.9a3.4 3.4 0 1 1 .65-6.74 4 4 0 0 1 7.75 1.34 2.7 2.7 0 0 1-2.9 5.4Z"/><path d="M8 12.5V7.2M6.2 9l1.8-1.8L9.8 9"/>'
   ),
   copy: svg('<rect x="5.5" y="5.5" width="8" height="8" rx="1.2"/><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/>'),
+  // Trash can (the Remote tab's Cloud-delete toolbar button).
+  trash: svg('<path d="M2.75 4.25h10.5M6.25 2.5h3.5M4.25 4.25l.6 8.3a1 1 0 0 0 1 .95h4.3a1 1 0 0 0 1-.95l.6-8.3M6.6 6.75v4M9.4 6.75v4"/>'),
 };

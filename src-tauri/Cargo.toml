@@ -31,5 +31,11 @@ gethostname = "1"
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 
+# Context-menu filtering (ctxmenu.rs). Versions pinned to what wry already
+# pulls in (see Cargo.lock) so this adds no second copy of the COM bindings.
+[target.'cfg(target_os = "windows")'.dependencies]
+webview2-com = "0.38"
+windows-core = "0.61"
+
 [profile.release]
 strip = true

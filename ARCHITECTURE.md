@@ -86,9 +86,10 @@ Remote is split along the same line as everything else: policy in the
 frontend, plumbing in Rust.
 
 **Rust (`remote.rs`)** provides a handful of stateless commands — push a
-host's buffers, add or delete a Cloud buffer, fetch everything, ping, report
-the machine's hostname — using reqwest with rustls (no OpenSSL build dependency
-on Windows), a 10-second timeout, and no retries. The HTTP must live in
+host's buffers, add or delete a Cloud buffer, forget a whole machine host,
+fetch everything, ping, report the machine's hostname — using reqwest with
+rustls (no OpenSSL build dependency on Windows), a 10-second timeout, and no
+retries. The HTTP must live in
 Rust: the webview's content-security policy is `default-src 'self'`, which
 blocks `fetch()` to a user-configured server, and a CSP can't be loosened
 for a URL chosen at runtime. Error mapping strips URLs and never logs the

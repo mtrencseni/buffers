@@ -19,6 +19,7 @@ import {
   cloudPush,
   fetchRemote,
   forcePush,
+  hostDelete,
   loadRemoteCache,
   HOST_RE,
   initRemote,
@@ -96,6 +97,11 @@ class App {
 
   private comboMap = new Map<string, CommandId>();
   private commandHandlers: Record<CommandId, () => boolean | void> = {} as any;
+  /** Toolbar action buttons by command id, for the contextual show/hide. */
+  private actionBtns: Partial<Record<CommandId, HTMLButtonElement>> = {};
+  /** Cloud-delete toolbar button (Remote tab, Cloud selection only). */
+  private delBtn = el("button", "tbtn");
+  private delArmTimer = 0;
 
   async init(): Promise<void> {
     const [saved, session] = await Promise.all([
@@ -116,6 +122,10 @@ class App {
         }
       } catch {}
     }
+
+    // Mirror "Developer mode" into the backend: the Windows context-menu
+    // filter keeps its Inspect item only while this is on (ctxmenu.rs).
+    void invoke("set_devmode", { enabled: state.settings.devTools }).catch(() => {});
 
     applyTheme(state.settings.theme);
     this.buildShell();
@@ -162,10 +172,20 @@ class App {
       importFile: () => void this.importFile(),
       exportFile: () => void this.exportFile(),
       find: () => {
+        // In the Remote tab, find searches the (read-only) preview.
+        if (this.activeSys === "remote") {
+          this.remoteView?.page.openFind();
+          return;
+        }
         this.showBuffers();
         this.editor.openFind();
       },
       replace: () => {
+        // Same panel: under readOnly CM hides its replace row anyway.
+        if (this.activeSys === "remote") {
+          this.remoteView?.page.openFind();
+          return;
+        }
         this.showBuffers();
         this.editor.openFind();
       },
@@ -278,20 +298,41 @@ class App {
 
     // Every action here is also a shortcut and lives in the same command registry —
     // the toolbar just makes the important ones visible (there's no native menu).
+    // Refs are kept so syncActions() can hide the buffer-only ones while the
+    // Remote tab is showing (only Find applies to a read-only remote buffer).
     const action = (id: CommandId, icon: string, label: string) => {
       const b = el("button", "tbtn");
       b.innerHTML = icon;
       b.title = label + hint(id);
       b.addEventListener("click", () => this.commandHandlers[id]());
+      this.actionBtns[id] = b;
       return b;
     };
+    // Cloud delete for the Remote tab's selected buffer. Not a command — it's
+    // contextual (visible only for a Cloud selection), and destructive, so it
+    // uses the same two-click arm/confirm idiom as the row ×.
+    this.delBtn.innerHTML = icons.trash;
+    this.delBtn.title = "Delete this buffer from Cloud";
+    this.delBtn.hidden = true;
+    this.delBtn.addEventListener("click", () => {
+      if (!this.delBtn.classList.contains("armed")) {
+        this.delBtn.classList.add("armed");
+        this.delBtn.title = "Click again to permanently delete from Cloud";
+        clearTimeout(this.delArmTimer);
+        this.delArmTimer = window.setTimeout(() => this.disarmDelete(), 4000);
+        return;
+      }
+      this.disarmDelete();
+      void this.remoteView?.page.deleteSelected();
+    });
     this.actionsEl.append(
       action("importFile", icons.importFile, "Import file"),
       action("exportFile", icons.exportFile, "Save buffer to a file"),
       action("pushCloud", icons.cloudUp, "Push buffer to Cloud"),
       action("closeTab", icons.closeBuffer, "Close buffer"),
       action("find", icons.search, "Find"),
-      action("replace", icons.replace, "Find & replace")
+      action("replace", icons.replace, "Find & replace"),
+      this.delBtn
     );
 
     this.themeBtn.addEventListener("click", () => this.toggleTheme());
@@ -592,6 +633,27 @@ class App {
     this.settingsView?.el.classList.toggle("active", this.activeSys === "settings");
     this.kbView?.el.classList.toggle("active", this.activeSys === "keybindings");
     this.remoteView?.el.classList.toggle("active", this.activeSys === "remote");
+    this.syncActions();
+  }
+
+  /** Fit the action toolbar to what's showing. In the Remote tab the buffer
+      actions (import/export/push/close/replace) make no sense on a read-only
+      remote buffer and hide; Find stays (it searches the preview), and a Cloud
+      Delete appears only while the selection is a Cloud buffer. */
+  private syncActions(): void {
+    const remote = this.activeSys === "remote";
+    for (const [id, b] of Object.entries(this.actionBtns)) {
+      if (b) b.hidden = remote && id !== "find";
+    }
+    const sel = remote ? this.remoteView?.page.selection() ?? null : null;
+    this.delBtn.hidden = !sel?.cloud;
+    if (this.delBtn.hidden) this.disarmDelete();
+  }
+
+  private disarmDelete(): void {
+    clearTimeout(this.delArmTimer);
+    this.delBtn.classList.remove("armed");
+    this.delBtn.title = "Delete this buffer from Cloud";
   }
 
   // ---- system tabs (Settings / Shortcuts / Remote) ------------------------------
@@ -676,6 +738,7 @@ class App {
       onDevTools: (v) => {
         state.settings.devTools = v;
         this.syncDevBtn();
+        void invoke("set_devmode", { enabled: v }).catch(() => {});
         if (!v) void invoke("close_devtools").catch(() => {});
         persist();
       },
@@ -776,7 +839,9 @@ class App {
       },
       openSettings: () => this.openSys("settings"),
       deleteCloud: (name) => cloudDelete(name),
+      deleteHost: (host) => hostDelete(host),
       status: () => remoteStatus,
+      selectionChanged: () => this.syncActions(),
     });
     wrap.append(page.el);
     this.contentEl.append(wrap);

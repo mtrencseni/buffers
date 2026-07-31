@@ -330,6 +330,8 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-single-instance",
  "tauri-plugin-window-state",
+ "webview2-com",
+ "windows-core 0.61.2",
 ]
 
 [[package]]

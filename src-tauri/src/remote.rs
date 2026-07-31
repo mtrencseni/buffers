@@ -116,6 +116,34 @@ pub async fn cloud_delete(
     ok_status(resp).map(|_| ())
 }
 
+/// DELETE an entire machine host — all its buffers and its server-side
+/// history. For retired hardware and stale hostnames; a machine that is still
+/// running simply re-appears on its next push. Idempotent like cloud_delete:
+/// 404 (already gone) is the outcome the caller wanted. The server refuses
+/// the Cloud host with 409 — the curated store deliberately has no one-shot
+/// wipe — which gets its own message here instead of a bare "HTTP 409".
+#[tauri::command]
+pub async fn host_delete(
+    url: String,
+    user: String,
+    token: String,
+    host: String,
+) -> Result<(), String> {
+    let resp = client()?
+        .delete(format!("{}/api/v1/{}/{}", base(&url), user, host))
+        .header("X-Buffers-Token", token)
+        .send()
+        .await
+        .map_err(net_err)?;
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(());
+    }
+    if resp.status() == reqwest::StatusCode::CONFLICT {
+        return Err("the Cloud store has no one-shot wipe — delete its buffers one by one".into());
+    }
+    ok_status(resp).map(|_| ())
+}
+
 /// GET every host's buffers, newest host first (the Remote tab's data).
 #[tauri::command]
 pub async fn remote_fetch(url: String, user: String, token: String) -> Result<Value, String> {

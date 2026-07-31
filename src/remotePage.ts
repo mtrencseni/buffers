@@ -11,9 +11,17 @@
 // delete: they self-correct on the owning machine's next push.
 
 import { EditorState } from "@codemirror/state";
-import { EditorView, lineNumbers } from "@codemirror/view";
+import { drawSelection, EditorView, highlightSpecialChars, keymap, lineNumbers } from "@codemirror/view";
+import { defaultKeymap } from "@codemirror/commands";
 import { syntaxHighlighting } from "@codemirror/language";
-import { highlight } from "./editor-core";
+import { closeSearchPanel, highlightSelectionMatches, openSearchPanel, search } from "@codemirror/search";
+import {
+  highlight,
+  minimapExtension,
+  overlayScrollbar,
+  selectionWhitespace,
+  sublimeSelection,
+} from "./editor-core";
 import { isLangId, LANGS } from "./langs";
 import { state } from "./state";
 import { icons } from "./icons";
@@ -32,14 +40,26 @@ export interface RemoteHooks {
   openSettings(): void;
   /** Remove one Cloud buffer by name (Cloud hosts only). Resolves when gone. */
   deleteCloud(name: string): Promise<void>;
+  /** Forget a whole machine host (never the Cloud). Resolves when gone. */
+  deleteHost(host: string): Promise<void>;
   /** Push health, shown in the toolbar (the only place besides Settings). */
   status(): { lastPushAt: number; lastError: string };
+  /** The selected host/buffer changed — the app syncs its toolbar (the Cloud
+      Delete button only applies to a Cloud selection). */
+  selectionChanged?(): void;
 }
 
 export interface RemotePage {
   el: HTMLElement;
   /** Re-fetch and re-render (called every time the tab is opened). */
   sync(): void;
+  /** Open the find panel in the preview (the toolbar's Find routes here). */
+  openFind(): void;
+  /** The selected buffer, and whether it's a Cloud one (deletable from the
+      toolbar). Null when nothing is selected. */
+  selection(): { name: string; cloud: boolean } | null;
+  /** Delete the selected Cloud buffer. The caller owns the confirm step. */
+  deleteSelected(): Promise<void>;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -79,19 +99,37 @@ async function copyText(text: string): Promise<void> {
   toast("Copied");
 }
 
-/** A read-only editor state that renders exactly like the real editor: same
-    highlight style, same language syntax, wrap following the user's setting. */
+/** A read-only editor state that renders — and handles — exactly like the real
+    editor: same highlight style, syntax, selection layer, minimap and find. The
+    readOnly facet blocks every edit, but the view stays interactive: a live
+    cursor, keyboard/mouse selection, and native ⌘C copy. (No editable(false):
+    that would kill the cursor. And the custom selection pieces are mandatory,
+    not cosmetic — editor-core.css hides the NATIVE selection inside .edhost,
+    so without drawSelection + sublimeSelection a selection would be invisible.) */
 function previewState(buf: RemoteBuffer): EditorState {
   const lang = isLangId(buf.language) ? buf.language : "plain";
   const syntax = LANGS[lang].syntax();
   return EditorState.create({
     doc: buf.text,
     extensions: [
-      lineNumbers(),
       EditorState.readOnly.of(true),
-      EditorView.editable.of(false),
+      lineNumbers(),
+      highlightSpecialChars(),
+      drawSelection(),
+      sublimeSelection,
+      selectionWhitespace,
+      highlightSelectionMatches(),
+      state.settings.minimap ? minimapExtension() : [],
+      overlayScrollbar,
       state.settings.wrapLines ? EditorView.lineWrapping : [],
       syntaxHighlighting(highlight),
+      // Find works here (the toolbar's Find routes in); readOnly makes CM's
+      // panel hide its replace row, so there's nothing to hide ourselves.
+      search({ top: true }),
+      keymap.of([
+        { key: "Escape", run: closeSearchPanel, scope: "editor search-panel" },
+        ...defaultKeymap, // cursor movement; edits are no-ops under readOnly
+      ]),
       syntax ?? [],
     ],
   });
@@ -129,6 +167,59 @@ export function buildRemotePage(hooks: RemoteHooks): RemotePage {
   // One persistent read-only view; selecting a buffer swaps its state in.
   const view = new EditorView({ parent: edHost });
 
+  // Right-click: the NATIVE context menu on a contenteditable offers Cut /
+  // Paste / spellcheck — edit commands that can't apply to a read-only buffer
+  // and would just no-op confusingly. The webview can't drop items from its
+  // native menu, but it honors preventDefault — so replace it with a small
+  // menu of exactly what works here: Copy (of the selection) and Select all.
+  let ctxMenu: HTMLElement | null = null;
+  const closeCtxMenu = () => {
+    ctxMenu?.remove();
+    ctxMenu = null;
+    document.removeEventListener("mousedown", onCtxAway, true);
+    window.removeEventListener("keydown", onCtxKey, true);
+    window.removeEventListener("blur", closeCtxMenu);
+  };
+  const onCtxAway = (e: MouseEvent) => {
+    if (ctxMenu && !ctxMenu.contains(e.target as Node)) closeCtxMenu();
+  };
+  const onCtxKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      closeCtxMenu();
+    }
+  };
+  edHost.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    closeCtxMenu();
+    const menu = el("div", "droplist ctxmenu");
+    const item = (label: string, run: () => void, enabled = true) => {
+      const b = el("button", "dropitem" + (enabled ? "" : " disabled"));
+      b.textContent = label;
+      if (enabled)
+        b.addEventListener("click", () => {
+          closeCtxMenu();
+          run();
+        });
+      menu.append(b);
+    };
+    const sel = view.state.selection.main;
+    item("Copy", () => void copyText(view.state.sliceDoc(sel.from, sel.to)), sel.from !== sel.to);
+    item("Select all", () => {
+      view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } });
+      view.focus();
+    });
+    document.body.append(menu);
+    // At the pointer, nudged back inside the viewport if it would overflow.
+    const r = menu.getBoundingClientRect();
+    menu.style.left = `${Math.min(e.clientX, window.innerWidth - r.width - 8)}px`;
+    menu.style.top = `${Math.min(e.clientY, window.innerHeight - r.height - 8)}px`;
+    ctxMenu = menu;
+    document.addEventListener("mousedown", onCtxAway, true);
+    window.addEventListener("keydown", onCtxKey, true);
+    window.addEventListener("blur", closeCtxMenu);
+  });
+
   let data: RemoteData | null = null;
   /** Date.now() when `data` came off the server (0 = never). */
   let fetchedAt = 0;
@@ -165,7 +256,11 @@ export function buildRemotePage(hooks: RemoteHooks): RemotePage {
         `${h.buffers.length} buffer${h.buffers.length === 1 ? "" : "s"} · ${ago(h.received_at)}`
       );
       row.append(name, sub);
-      row.addEventListener("click", () => {
+      // Machine mirrors can be forgotten wholesale; the Cloud row never can
+      // (gate on kind, never the name — same rule as the per-buffer delete).
+      if (h.kind !== "cloud") row.append(hostDeleteControl(h));
+      row.addEventListener("click", (e) => {
+        if ((e.target as HTMLElement).closest(".remote-del")) return; // the × owns its clicks
         selHost = h.host;
         selBuf = 0;
         renderHosts();
@@ -177,19 +272,29 @@ export function buildRemotePage(hooks: RemoteHooks): RemotePage {
     hostsEl.replaceChildren(frag);
   };
 
-  /** The × on a Cloud row. Deleting is destructive and can't be undone from the
-      app, so the first click only arms it: the × becomes a "Delete?" the user
-      must hit again. Anything else — a second thought, 4 s, another row — puts
-      it back. (The app has no modal system; this stays in the row.) */
-  const deleteControl = (name: string): HTMLElement => {
+  /** A × delete control (Cloud buffers, machine hosts). Deleting is destructive
+      and can't be undone from the app, so the first click only arms it: the ×
+      becomes a confirm label the user must hit again. Anything else — a second
+      thought, 4 s, another row — puts it back. (The app has no modal system;
+      this stays in the row.) `run` owns its own success/failure toasts; the
+      control refreshes afterwards either way, because the server is the truth. */
+  const deleteControl = (opts: {
+    /** Tooltip on the ×. */
+    title: string;
+    /** The armed label ("Delete?" / "Delete all N from host?"). */
+    confirmLabel: string;
+    /** Tooltip on the armed label — state exactly what will happen. */
+    confirmTitle: string;
+    run: () => Promise<void>;
+  }): HTMLElement => {
     const wrap = el("span", "remote-del");
     const x = el("span", "tabclose");
     x.innerHTML = icons.close;
-    x.title = "Delete from Cloud";
+    x.title = opts.title;
     // A span, not a button: the row itself is a <button> and nesting one inside
     // another is invalid HTML. Same reason .tabclose is a span in main.ts.
-    const confirm = el("span", "remote-delconfirm", "Delete?");
-    confirm.title = "Permanently remove this buffer from the Cloud store";
+    const confirm = el("span", "remote-delconfirm", opts.confirmLabel);
+    confirm.title = opts.confirmTitle;
     wrap.append(x, confirm);
     let armTimer = 0;
     const disarm = () => {
@@ -206,19 +311,51 @@ export function buildRemotePage(hooks: RemoteHooks): RemotePage {
       e.stopPropagation();
       disarm();
       void (async () => {
+        await opts.run();
+        await refresh();
+      })();
+    });
+    return wrap;
+  };
+
+  /** The Cloud row's per-buffer ×. */
+  const cloudDeleteControl = (name: string): HTMLElement =>
+    deleteControl({
+      title: "Delete from Cloud",
+      confirmLabel: "Delete?",
+      confirmTitle: "Permanently remove this buffer from the Cloud store",
+      run: async () => {
         try {
           await hooks.deleteCloud(name);
           toast(`Deleted from Cloud: ${name}`);
         } catch (err) {
           toast(`Cloud delete failed: ${err}`);
         }
-        // Refresh either way: on success to drop the row, on failure because the
-        // server is the truth — a 404 (already gone) resolves as success above.
-        await refresh();
-      })();
+      },
     });
-    return wrap;
-  };
+
+  /** The × on a machine-host row: forget the whole machine. Heavier than the
+      per-buffer delete — the label names the host and counts what goes. Only
+      for machine mirrors (kind !== "cloud"); the Cloud row never gets one. */
+  const hostDeleteControl = (h: RemoteHost): HTMLElement =>
+    deleteControl({
+      title: `Forget ${h.host} (all its buffers and history)`,
+      confirmLabel: `Delete all ${h.buffers.length} from ${h.host}?`,
+      confirmTitle:
+        `Remove ${h.host} from the server: all ${h.buffers.length} buffer${
+          h.buffers.length === 1 ? "" : "s"
+        } and its history. ` +
+        "Meant for retired machines — one that is still running re-appears on its next push.",
+      run: async () => {
+        try {
+          await hooks.deleteHost(h.host);
+          // The truth about live machines, at the moment it matters.
+          toast(`Forgot ${h.host} — a live machine returns on its next push`);
+        } catch (err) {
+          toast(`Couldn't delete ${h.host}: ${err}`);
+        }
+      },
+    });
 
   const renderBuffers = () => {
     const host = currentHost();
@@ -230,7 +367,7 @@ export function buildRemotePage(hooks: RemoteHooks): RemotePage {
       const lang = isLangId(b.language) ? LANGS[b.language].label : b.language;
       const sub = el("div", "remote-rowsub", `${lang} · ${b.text.length.toLocaleString()} chars`);
       row.append(name, sub);
-      if (isCloud) row.append(deleteControl(b.name));
+      if (isCloud) row.append(cloudDeleteControl(b.name));
       row.addEventListener("click", (e) => {
         if ((e.target as HTMLElement).closest(".remote-del")) return; // the × owns its clicks
         selBuf = i;
@@ -242,6 +379,9 @@ export function buildRemotePage(hooks: RemoteHooks): RemotePage {
       frag.append(el("div", "remote-empty", host ? "No buffers" : "Select a host"));
     bufsEl.replaceChildren(frag);
     renderPreview();
+    // Every selection path funnels through here (host click, buffer click,
+    // refresh) — one place to tell the app to re-sync its toolbar.
+    hooks.selectionChanged?.();
   };
 
   const renderPreview = () => {
@@ -323,5 +463,23 @@ export function buildRemotePage(hooks: RemoteHooks): RemotePage {
   return {
     el: root,
     sync: () => void refresh(),
+    openFind: () => openSearchPanel(view),
+    selection: () => {
+      const host = currentHost();
+      const buf = currentBuf();
+      return host && buf ? { name: buf.name, cloud: host.kind === "cloud" } : null;
+    },
+    deleteSelected: async () => {
+      const host = currentHost();
+      const buf = currentBuf();
+      if (!host || !buf || host.kind !== "cloud") return; // Cloud only, by kind
+      try {
+        await hooks.deleteCloud(buf.name);
+        toast(`Deleted from Cloud: ${buf.name}`);
+      } catch (err) {
+        toast(`Cloud delete failed: ${err}`);
+      }
+      await refresh();
+    },
   };
 }

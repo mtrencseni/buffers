@@ -1401,3 +1401,30 @@ body.tab-dragging * {
 .remote-del.armed .remote-delconfirm {
   display: block;
 }
+
+/* The Cloud-delete toolbar button, armed (first click of the two-click
+   confirm): reads as danger until it disarms or the second click lands. */
+.tbtn.armed {
+  color: var(--error-text);
+  background: var(--error-bg);
+}
+
+/* Custom context menu for the read-only Remote preview (replaces the native
+   one, whose Cut/Paste can't apply there). Reuses the droplist look. */
+.ctxmenu {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: auto;
+  z-index: 1300;
+  min-width: 8rem;
+}
+
+.dropitem.disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.dropitem.disabled:hover {
+  background: none;
+}

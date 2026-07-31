@@ -218,6 +218,20 @@ export async function cloudDelete(name: string): Promise<void> {
   });
 }
 
+/** Forget an entire machine host — every buffer and the server-side history.
+    For retired hardware: a machine that is still running re-appears on its
+    next push. Already-gone (404) counts as done; the server refuses the Cloud
+    host (409), which surfaces as a clear message. */
+export async function hostDelete(host: string): Promise<void> {
+  const s = state.settings;
+  await invoke<void>("host_delete", {
+    url: s.remoteUrl,
+    user: s.remoteUser,
+    token: s.remoteToken,
+    host,
+  });
+}
+
 /** Install the immediate-push triggers. Call AFTER the Editor is constructed
     and main.ts's pagehide flush is registered: same-event listeners run in
     registration order, so the editor's flush (which queues the fresh payload

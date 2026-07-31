@@ -85,6 +85,38 @@ const cloudStore: { name: string; language: string; text: string; pushed_at: num
   },
 ];
 
+/** The machine mirrors the stubs serve — mutable so host_delete can actually
+    remove one and the Remote tab's refresh/fallback paths can be exercised. */
+const machineHosts: { host: string; agoSeconds: number; buffers: { name: string; language: string; text: string }[] }[] = [
+  {
+    host: "work-laptop",
+    agoSeconds: 300,
+    buffers: [
+      {
+        name: "Standup notes",
+        language: "markdown",
+        text: "# Standup notes\n\n- shipped the importer\n- next: the flaky test on CI\n",
+      },
+      {
+        name: "query.sql",
+        language: "sql",
+        text: "SELECT host, COUNT(*) AS buffers\nFROM sessions\nGROUP BY host\nORDER BY buffers DESC;\n",
+      },
+    ],
+  },
+  {
+    host: "home-desktop",
+    agoSeconds: 86400 * 2,
+    buffers: [
+      {
+        name: "fib.py",
+        language: "python",
+        text: "def fib(n):\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a\n",
+      },
+    ],
+  },
+];
+
 export async function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   switch (cmd) {
     case "load_state":
@@ -104,6 +136,7 @@ export async function mockInvoke<T>(cmd: string, args?: Record<string, unknown>)
       return undefined as T;
     case "toggle_devtools":
     case "close_devtools":
+    case "set_devmode": // Windows context-menu filter; nothing to mock
       return undefined as T;
     // Remote stubs: never reach the real server from the browser (it's
     // cross-origin and sends no CORS headers) — canned data drives the UI.
@@ -158,6 +191,18 @@ export async function mockInvoke<T>(cmd: string, args?: Record<string, unknown>)
       console.log("[mock] cloud_delete", name, i >= 0 ? "(removed)" : "(already gone)");
       return undefined as T;
     }
+    case "host_delete": {
+      const host = String(args?.host ?? "");
+      // Mirror the server's 409 for the Cloud host (and the Rust command's
+      // message for it): the curated store has no one-shot wipe.
+      if (host === "Cloud")
+        throw "the Cloud store has no one-shot wipe — delete its buffers one by one";
+      const i = machineHosts.findIndex((h) => h.host === host);
+      // Already gone (404) is success, exactly like cloud_delete.
+      if (i >= 0) machineHosts.splice(i, 1);
+      console.log("[mock] host_delete", host, i >= 0 ? "(removed)" : "(already gone)");
+      return undefined as T;
+    }
     case "remote_fetch": {
       // Dev switch for the offline path: localStorage["mock-offline"] = "1"
       // makes every fetch fail the way a plane does, so the Remote tab's cached
@@ -175,37 +220,13 @@ export async function mockInvoke<T>(cmd: string, args?: Record<string, unknown>)
             received_iso: iso(0),
             buffers: cloudStore.map((b) => ({ ...b })),
           },
-          {
-            host: "work-laptop",
+          ...machineHosts.map((h) => ({
+            host: h.host,
             kind: "host",
-            received_at: now - 300,
-            received_iso: iso(300),
-            buffers: [
-              {
-                name: "Standup notes",
-                language: "markdown",
-                text: "# Standup notes\n\n- shipped the importer\n- next: the flaky test on CI\n",
-              },
-              {
-                name: "query.sql",
-                language: "sql",
-                text: "SELECT host, COUNT(*) AS buffers\nFROM sessions\nGROUP BY host\nORDER BY buffers DESC;\n",
-              },
-            ],
-          },
-          {
-            host: "home-desktop",
-            kind: "host",
-            received_at: now - 86400 * 2,
-            received_iso: iso(86400 * 2),
-            buffers: [
-              {
-                name: "fib.py",
-                language: "python",
-                text: "def fib(n):\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a\n",
-              },
-            ],
-          },
+            received_at: now - h.agoSeconds,
+            received_iso: iso(h.agoSeconds),
+            buffers: h.buffers.map((b) => ({ ...b })),
+          })),
         ],
       } as T;
     }
