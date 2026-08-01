@@ -55,7 +55,10 @@ export interface Command {
 export const COMMANDS: Command[] = [
   // Tabs
   { id: "newTab", label: "New buffer", group: "Buffers", defaults: [`${MOD}+KeyT`, `${MOD}+KeyN`] },
-  { id: "closeTab", label: "Close buffer", group: "Buffers", defaults: [`${MOD}+KeyW`] },
+  // Ctrl+F4 is the Windows close-document convention (and has been since MDI);
+  // it sits alongside Ctrl+W rather than replacing it. No macOS equivalent —
+  // ⌘F4 means nothing there, so the Mac keeps ⌘W alone.
+  { id: "closeTab", label: "Close buffer", group: "Buffers", defaults: isMac ? [`${MOD}+KeyW`] : [`${MOD}+KeyW`, "Ctrl+F4"] },
   { id: "reopenTab", label: "Reopen closed buffer", short: "Reopen", group: "Buffers", defaults: [`${MOD}+Shift+KeyT`] },
   { id: "nextTab", label: "Next buffer", group: "Buffers", defaults: [`${MOD}+Shift+BracketRight`, "Ctrl+Tab"] },
   { id: "prevTab", label: "Previous buffer", short: "Prev buffer", group: "Buffers", defaults: [`${MOD}+Shift+BracketLeft`, "Ctrl+Shift+Tab"] },
@@ -194,7 +197,19 @@ export function mergeKeybindings(saved: unknown): Record<CommandId, string[]> {
     const s = saved as Record<string, unknown>;
     for (const c of COMMANDS) {
       const v = s[c.id];
-      if (Array.isArray(v) && v.every((x) => typeof x === "string")) base[c.id] = v as string[];
+      // COPY, don't alias: the adopt step below pushes into these arrays, and
+      // mutating the caller's object is a nasty surprise.
+      if (Array.isArray(v) && v.every((x) => typeof x === "string")) base[c.id] = [...(v as string[])];
+    }
+    // A saved config stores the FULL binding set, so a newly-added default stays
+    // shadowed by an older snapshot forever. Adopt these for configs that
+    // predate them — unless the user has since bound that combo elsewhere.
+    // (Windows' Ctrl+F4 close; on macOS it's the ⌘W already there, so no-op.)
+    for (const [id, combo] of [["closeTab", isMac ? `${MOD}+KeyW` : "Ctrl+F4"]] as const) {
+      const usedElsewhere = (Object.entries(base) as [CommandId, string[]][]).some(
+        ([cid, combos]) => cid !== id && combos.includes(combo)
+      );
+      if (!usedElsewhere && !base[id].includes(combo)) base[id].push(combo);
     }
   }
   return base;
