@@ -33,12 +33,64 @@ cd src-tauri && cargo check
 
 Dev server runs on **:1430** (Delight uses :1420, so both can run at once).
 
+## Cutting a release
+
+Pushing a `v*` tag is the whole trigger: `.github/workflows/release.yml` builds
+the Windows x64 portable exe on a runner and opens a **draft** release. macOS is
+not built in CI — attach it from a Mac. Do these in order:
+
+1. **Update the docs to match what shipped.** Every release, before tagging:
+   - `README.md` — the Features section and the shortcut table. This is the file
+     that rots fastest, because features land without anyone re-reading it. It
+     claimed "19 languages" when there were 50, and never mentioned Remote at
+     all. Check the table against `COMMANDS` in `src/commands.ts` rather than
+     trusting it:
+     `grep -oE '\{ id: "[a-zA-Z]+".*defaults: \[[^]]*\]' src/commands.ts`.
+     Never name a version number in the README — it dates the file, and the
+     download links already point at "latest".
+   - `PRODUCT.md` — especially "What Buffers is not", where a shipped feature
+     can contradict an old promise.
+   - `ARCHITECTURE.md` — new subsystems and their seams.
+   - This file — the cross-platform status table.
+2. **Bump the version in all four places**, or the workflow fails the build:
+   `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and
+   `Cargo.lock` (a `cargo check` refreshes it). The tag must match
+   `tauri.conf.json` exactly — three-part semver, `v0.2.0` not `v0.2`.
+3. `git tag -a vX.Y.Z && git push origin vX.Y.Z`, then watch
+   `gh run list --repo mtrencseni/buffers`.
+4. **Build and attach macOS** once CI is green:
+   ```sh
+   pnpm tauri build
+   # upload the .dmg TWICE — versioned for the archive, unversioned because
+   # /releases/latest/download/<file> only resolves if the name is identical in
+   # every release, which is what the README links depend on.
+   cp …/Buffers_X.Y.Z_aarch64.dmg Buffers-X.Y.Z-macos_arm64.dmg
+   cp …/Buffers_X.Y.Z_aarch64.dmg Buffers-macos_arm64.dmg
+   shasum -a 256 <each> > <each>.sha256
+   gh release upload vX.Y.Z *.dmg *.sha256 --repo mtrencseni/buffers --clobber
+   ```
+   Then re-download and verify every checksum before publishing.
+5. **Write the notes and publish.** `generate_release_notes` produces only a
+   changelog link (everything lands straight on `main`, so there are no PR
+   titles to harvest) — replace it from `git log vPREV..vNEW`. Keep the
+   unsigned-build caveat: the macOS app is self-signed, so Gatekeeper blocks it
+   elsewhere, and the Windows exe trips SmartScreen.
+   `gh release edit vX.Y.Z --notes-file … --draft=false --latest`
+
+Note: both repos are **private**, so `/releases/latest/download/…` 404s for
+anyone not signed in with access. The README links only work for collaborators
+until the repos go public.
+
 ## Shared with Delight — `editor-core.ts` / `editor-core.css` / `langs.ts`
 
 These three files are the **single source of truth** for the editor look-and-feel
-and are **symlinked into Delight** (`~/Repositories/Delight/src/`) for its
+and are **re-exported by Delight** (`~/Repositories/Delight/src/`) for its
 read-only code preview — so a fix to the selection layer, syntax colors, or
-languages lands in both apps. `editor.ts` imports the shared CM pieces
+languages lands in both apps. Delight's `src/editor-core.ts` and `src/langs.ts`
+are one-line shims (`export * from "../../Buffers/src/<file>"`), which requires
+both repos checked out **side by side** under `Repositories/`. They used to be
+git symlinks; Windows can't check one out without admin or Developer Mode (it
+lands as a plain stub file and the build breaks), so don't "restore" them. `editor.ts` imports the shared CM pieces
 (`highlight`, `sublimeSelection`, `selectionWhitespace`, `overlayScrollbar`,
 `minimapExtension`) from `editor-core.ts`; `editor-core.css` holds the
 `.edhost .cm-editor` styling + the `--ed-*`/`--syn-*` tokens (scoped to `.edhost`).
