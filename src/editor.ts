@@ -4,7 +4,7 @@
 // persistence (Sublime-style) lives here too: buffers auto-save debounced and
 // come back exactly as they were — no save prompts, ever.
 
-import { Compartment, EditorSelection, EditorState, type Extension } from "@codemirror/state";
+import { Compartment, EditorSelection, EditorState, type Extension, type Text } from "@codemirror/state";
 import {
   drawSelection,
   EditorView,
@@ -13,11 +13,27 @@ import {
   highlightSpecialChars,
   keymap,
   lineNumbers,
+  type Command,
 } from "@codemirror/view";
-import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
-import { bracketMatching, indentOnInput, syntaxHighlighting } from "@codemirror/language";
+import {
+  copyLineDown,
+  copyLineUp,
+  defaultKeymap,
+  deleteLine,
+  history,
+  historyField,
+  historyKeymap,
+  indentLess,
+  indentMore,
+  indentWithTab,
+  moveLineDown,
+  moveLineUp,
+  toggleComment,
+} from "@codemirror/commands";
+import { bracketMatching, indentOnInput, indentUnit, syntaxHighlighting } from "@codemirror/language";
 import {
   closeSearchPanel,
+  gotoLine,
   highlightSelectionMatches,
   openSearchPanel,
   search,
@@ -105,6 +121,87 @@ function minimapExt(): Extension {
   return state.settings.minimap ? minimapExtension() : [];
 }
 
+/** Indent width and tabs-vs-spaces, for the current settings. `indentUnit` is
+    what Tab and the auto-indenter insert; `tabSize` is how wide an existing tab
+    character renders. They're driven from one setting so an imported file that
+    already uses tabs lines up with the indentation you add to it. */
+function indentExt(): Extension {
+  const n = state.settings.indentSize;
+  return [indentUnit.of(state.settings.indentTabs ? "\t" : " ".repeat(n)), EditorState.tabSize.of(n)];
+}
+
+/** Editing commands Buffers owns as REBINDABLE commands (see commands.ts)
+    instead of leaving them buried in CodeMirror's defaultKeymap, where they
+    were invisible in the Shortcuts tab and the ⌘K keyboard map. The ids match
+    their CommandId; main.ts dispatches them through Editor.run(). */
+export type EditorCommandId =
+  | "toggleComment"
+  | "deleteLine"
+  | "moveLineUp"
+  | "moveLineDown"
+  | "duplicateLineUp"
+  | "duplicateLineDown"
+  | "indentMore"
+  | "indentLess"
+  | "gotoLine";
+
+// Wrapped rather than referenced directly: several of these are StateCommands
+// (they take {state, dispatch}, not a view), and one uniform signature keeps
+// the dispatch site in main.ts from caring which is which.
+export const EDITOR_COMMANDS: Record<EditorCommandId, (view: EditorView) => boolean> = {
+  toggleComment: (v) => toggleComment(v),
+  deleteLine: (v) => deleteLine(v),
+  moveLineUp: (v) => moveLineUp(v),
+  moveLineDown: (v) => moveLineDown(v),
+  duplicateLineUp: (v) => copyLineUp(v),
+  duplicateLineDown: (v) => copyLineDown(v),
+  indentMore: (v) => indentMore(v),
+  indentLess: (v) => indentLess(v),
+  gotoLine: (v) => gotoLine(v),
+};
+
+// The same commands as CM knows them, for pruning the stock keymap below.
+// Identity matters here, so these are the originals, not the wrappers above.
+const OWNED_BY_REGISTRY: unknown[] = [
+  toggleComment,
+  deleteLine,
+  moveLineUp,
+  moveLineDown,
+  copyLineUp,
+  copyLineDown,
+  indentMore,
+  indentLess,
+];
+
+/** defaultKeymap minus the bindings the command registry now owns. Without this
+    CM would keep answering the hardcoded key after a rebind — the old key would
+    still work and the new one would fire twice. (gotoLine isn't listed: it ships
+    in searchKeymap, which Buffers doesn't install.) */
+const baseKeymap = defaultKeymap.filter((b) => !OWNED_BY_REGISTRY.includes(b.run));
+
+/** Words in a document: runs of non-whitespace, which is the count people mean
+    when they're drafting prose. Walks the Text in chunks so a large buffer never
+    has to be materialized as a single string. */
+function countWords(doc: Text): number {
+  let words = 0;
+  let inWord = false;
+  const iter = doc.iter();
+  while (!iter.next().done) {
+    const chunk = iter.value;
+    for (let i = 0; i < chunk.length; i++) {
+      const space = chunk.charCodeAt(i) <= 32;
+      if (!space && !inWord) words++;
+      inWord = !space;
+    }
+  }
+  return words;
+}
+
+/** Above this many characters a buffer's undo history isn't persisted: history
+    events hold the text they changed, so on a big document they'd dominate
+    .buffers.json for little benefit. The buffer itself still restores. */
+const HISTORY_DOC_MAX = 256 * 1024;
+
 
 interface Buf {
   id: number;
@@ -152,6 +249,13 @@ export class Editor {
   private minimapComp = new Compartment();
   private activeLineComp = new Compartment();
   private fontComp = new Compartment();
+  private indentComp = new Compartment();
+
+  // Word count, memoized on the Text object: cursor movement re-renders the
+  // status bar constantly and must not re-count, but Text is immutable so a
+  // changed doc is always a different object.
+  private wordsDoc: Text | null = null;
+  private words = 0;
 
   // Hot-exit persistence state machine.
   private dirty = false;
@@ -203,9 +307,10 @@ export class Editor {
       // the editor scope for when focus is back in the text.
       keymap.of([{ key: "Escape", run: closeSearchPanel, scope: "editor search-panel" }]),
       syntaxHighlighting(highlight),
-      keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
+      keymap.of([...baseKeymap, ...historyKeymap, indentWithTab]),
       this.langComp.of(syntax ?? []),
       this.wrapComp.of(state.settings.wrapLines ? EditorView.lineWrapping : []),
+      this.indentComp.of(indentExt()),
       EditorView.updateListener.of((u) => {
         if (u.docChanged) {
           this.schedule();
@@ -221,13 +326,30 @@ export class Editor {
     ];
   }
 
-  private mkState(text: string, language: LangId, anchor = 0, head = 0): EditorState {
+  private mkState(
+    text: string,
+    language: LangId,
+    anchor = 0,
+    head = 0,
+    history?: unknown
+  ): EditorState {
     const len = text.length;
-    return EditorState.create({
-      doc: text,
-      selection: EditorSelection.single(Math.min(anchor, len), Math.min(head, len)),
-      extensions: this.extensions(language),
-    });
+    const selection = EditorSelection.single(Math.min(anchor, len), Math.min(head, len));
+    const extensions = this.extensions(language);
+    // A persisted undo history restores through fromJSON, which needs the doc and
+    // selection in the same call (the history's changes are positions into that
+    // doc). Anything malformed — an older session, a hand-edited file — falls
+    // back to a fresh state rather than losing the text.
+    if (history) {
+      try {
+        return EditorState.fromJSON(
+          { doc: text, selection: selection.toJSON(), history },
+          { extensions },
+          { history: historyField }
+        );
+      } catch {}
+    }
+    return EditorState.create({ doc: text, selection, extensions });
   }
 
   // ---- buffer lifecycle ---------------------------------------------------------
@@ -276,7 +398,7 @@ export class Editor {
     this.bufs.set(id, {
       id,
       language: snap.language,
-      state: this.mkState(snap.text, snap.language, snap.anchor, snap.head),
+      state: this.mkState(snap.text, snap.language, snap.anchor, snap.head, snap.history),
       scrollTop: snap.scrollTop,
       bufferName: snap.bufferName ?? "",
       namePinned: snap.namePinned ?? false,
@@ -289,8 +411,10 @@ export class Editor {
     return true;
   }
 
-  /** Switch the view to buffer `id` (stashing the current one's state first). */
-  activate(id: number): void {
+  /** Switch the view to buffer `id` (stashing the current one's state first).
+      `restoreScroll` is false when the caller is about to scroll somewhere else
+      itself — see reveal(), which would otherwise be undone by the restore. */
+  activate(id: number, restoreScroll = true): void {
     const buf = this.bufs.get(id);
     if (!buf) return;
     // Always stash: the view holds the live truth for the active buffer, and
@@ -304,9 +428,11 @@ export class Editor {
     // different font size / content width), which desyncs the gutter and
     // selection layer until CM re-reads the DOM.
     this.view.requestMeasure();
-    requestAnimationFrame(() => {
-      this.view.scrollDOM.scrollTop = buf.scrollTop;
-    });
+    if (restoreScroll) {
+      requestAnimationFrame(() => {
+        this.view.scrollDOM.scrollTop = buf.scrollTop;
+      });
+    }
     this.view.focus();
     this.host.statusChanged();
     this.schedule(); // the active tab is part of the session
@@ -444,14 +570,28 @@ export class Editor {
     return this.view.state.doc.toString();
   }
 
-  /** Line / column / selection info for the status bar. */
-  status(): { line: number; col: number; chars: number; selected: number } {
+  /** The selected text, when it's a plausible search query — one short line.
+      Seeds the find-in-all-buffers box the way a find panel prefills. */
+  selectedText(): string {
+    const main = this.view.state.selection.main;
+    if (main.empty || main.to - main.from > 100) return "";
+    const text = this.view.state.sliceDoc(main.from, main.to);
+    return text.includes("\n") ? "" : text;
+  }
+
+  /** Line / column / size / selection info for the status bar. */
+  status(): { line: number; col: number; words: number; chars: number; selected: number } {
     const st = this.view.state;
     const main = st.selection.main;
     const line = st.doc.lineAt(main.head);
+    if (this.wordsDoc !== st.doc) {
+      this.wordsDoc = st.doc;
+      this.words = countWords(st.doc);
+    }
     return {
       line: line.number,
       col: main.head - line.from + 1,
+      words: this.words,
       chars: st.doc.length,
       selected: main.to - main.from,
     };
@@ -461,6 +601,40 @@ export class Editor {
     openSearchPanel(this.view);
   }
 
+  /** Run one of the CodeMirror editing commands the registry owns (see
+      EDITOR_COMMANDS). Returns false when CM declined it, which lets the
+      keyboard layer fall through to the browser's own handling. */
+  run(id: EditorCommandId): boolean {
+    this.view.focus();
+    return EDITOR_COMMANDS[id](this.view);
+  }
+
+  /** Every buffer's text, in tab order — for searching across all of them. */
+  all(): { id: number; title: string; text: string }[] {
+    return this.order.map((id) => ({
+      id,
+      title: this.title(id),
+      text: this.docOf(id)?.toString() ?? "",
+    }));
+  }
+
+  /** Switch to `id` and put the selection on [from, to), scrolled into view —
+      how a cross-buffer search result is opened. */
+  reveal(id: number, from: number, to: number): void {
+    // Suppress the saved-scroll restore: it lands on the next frame and would
+    // otherwise scroll the match straight back off screen. Selecting
+    // synchronously also means the match is selected whether or not that frame
+    // ever arrives (a backgrounded window doesn't run rAF).
+    this.activate(id, false);
+    const len = this.view.state.doc.length;
+    this.view.dispatch({
+      selection: { anchor: Math.min(from, len), head: Math.min(to, len) },
+      scrollIntoView: true,
+      userEvent: "select.search",
+    });
+    this.view.focus();
+  }
+
   /** Toggle soft wrap across every buffer (setting changed). */
   applyWrap(): void {
     const ext = state.settings.wrapLines ? EditorView.lineWrapping : [];
@@ -468,6 +642,15 @@ export class Editor {
     for (const buf of this.bufs.values()) {
       if (buf.id === this.activeId) continue;
       buf.state = buf.state.update({ effects: this.wrapComp.reconfigure(ext) }).state;
+    }
+  }
+
+  /** Apply the indent width / tabs-vs-spaces setting across every buffer. */
+  applyIndent(): void {
+    this.view.dispatch({ effects: this.indentComp.reconfigure(indentExt()) });
+    for (const buf of this.bufs.values()) {
+      if (buf.id === this.activeId) continue;
+      buf.state = buf.state.update({ effects: this.indentComp.reconfigure(indentExt()) }).state;
     }
   }
 
@@ -530,9 +713,14 @@ export class Editor {
   private snapshot(buf: Buf): BufferSnapshot {
     const st = buf.id === this.activeId ? this.view.state : buf.state;
     const sel = st.selection.main;
+    // One toJSON yields both the text and the serialized undo history, so a
+    // flush doesn't stringify the document twice.
+    const json = st.toJSON({ history: historyField });
+    const text: string = json.doc;
     return {
       id: buf.id,
-      text: st.doc.toString(),
+      text,
+      history: text.length <= HISTORY_DOC_MAX ? json.history : undefined,
       language: buf.language,
       anchor: sel.anchor,
       head: sel.head,
@@ -590,7 +778,7 @@ export class Editor {
       this.bufs.set(id, {
         id,
         language: lang,
-        state: this.mkState(raw.text, lang, raw.anchor ?? 0, raw.head ?? 0),
+        state: this.mkState(raw.text, lang, raw.anchor ?? 0, raw.head ?? 0, raw.history),
         scrollTop: typeof raw.scrollTop === "number" ? raw.scrollTop : 0,
         bufferName: typeof raw.bufferName === "string" ? raw.bufferName : "",
         namePinned: raw.namePinned === true,

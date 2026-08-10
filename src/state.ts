@@ -7,6 +7,8 @@ export const FONT_MIN = 9;
 export const FONT_MAX = 32;
 export const SIDEBAR_MIN = 140;
 export const SIDEBAR_MAX = 420;
+export const INDENT_MIN = 1;
+export const INDENT_MAX = 8;
 
 export const state = {
   settings: {
@@ -18,10 +20,13 @@ export const state = {
     wrapLines: true,
     minimap: true,
     activeLine: false,
+    indentSize: 4,
+    indentTabs: false,
     lowercaseTabs: false,
     tabsSide: "top",
     sidebarWidth: 200,
     defaultLanguage: "plain",
+    searchAllBuffers: false,
     devTools: false,
     remoteUrl: "",
     remoteUser: "mtrencseni",

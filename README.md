@@ -25,14 +25,27 @@ Buffers are the point: text that lives in tabs, not files. Nothing is ever
 - **Import / export, not open / save.** **⌘O** copies a file's contents into a
   *new* buffer and forgets the file; **⌘S** writes a buffer out once. Files and
   buffers are never linked.
+- **Undo survives a restart.** The history is saved with the text, so **⌘Z**
+  after a reboot still walks back through what you did yesterday.
 
 **Editing**
 - **Syntax highlighting for 50 languages**, auto-detected on import and
   switchable from the status bar — the picker is sorted and keyboard-driven
   (type `py` to jump to Python).
-- Line numbers, **find & replace** (**⌘F** / **⌘⌥F**), a **minimap** with a
+- Line numbers, **find & replace** (**⌘F** / **⌘⌥F**), **go to line**
+  (**⌃G** — `120`, `+20`, `50%` and `12:4` all work), a **minimap** with a
   Sublime-style overlay scrollbar that floats over it and auto-hides, soft line
   wrap (**⌥Z**), optional active-line highlight, adjustable text size.
+- **Sublime's line-editing keys, and they're all rebindable** — toggle comment
+  (**⌘/**), delete (**⌘⇧K**), move (**⌥↑/↓**) and duplicate (**⌥⇧↑/↓**) a line,
+  indent and outdent (**⌘] / ⌘[**). Every one of them is listed in the
+  Shortcuts tab and drawn on the **⌘K** keyboard map.
+- **Search every open buffer at once** with **⌘⇧F**: hits grouped by buffer with
+  line numbers, Enter jumps to one. Off until you switch it on in Settings —
+  buffers are working text, not an archive.
+- **Indent your way**: set the width, and spaces or real tabs (four spaces by
+  default).
+- A status bar that counts **words** as well as characters.
 - Sublime's selection rendering, including whitespace marks inside the
   selection.
 
@@ -75,6 +88,13 @@ is Ctrl** (⌘T → Ctrl+T, ⌥ → Alt):
 | ⌘⇧R | Remote — other machines' buffers |
 | ⌘⇧C | Push this buffer to Cloud |
 | ⌘F / ⌘⌥F | Find / find & replace |
+| ⌘⇧F | Find in all buffers _(enable in Settings)_ |
+| ⌃G | Go to line |
+| ⌘/ | Toggle comment |
+| ⌘⇧K | Delete line |
+| ⌥↑ / ⌥↓ | Move line up / down |
+| ⌥⇧↑ / ⌥⇧↓ | Duplicate line up / down |
+| ⌘] / ⌘[ | Indent / outdent |
 | ⌥Z | Toggle line wrap |
 | ⌘+ ⌘− ⌘0 | Bigger / smaller / reset text size |
 | ⌘K | Keyboard map |

@@ -1,5 +1,5 @@
 import type { LangId, Settings, Theme } from "./types";
-import { FONT_MAX, FONT_MIN, hint } from "./state";
+import { FONT_MAX, FONT_MIN, INDENT_MAX, INDENT_MIN, hint } from "./state";
 import { LANGS } from "./langs";
 import { buildLangPicker } from "./langpicker";
 import { icons } from "./icons";
@@ -12,6 +12,9 @@ export interface SettingsHooks {
   onWrapLines(v: boolean): void;
   onMinimap(v: boolean): void;
   onActiveLine(v: boolean): void;
+  onIndentSize(n: number): void;
+  onIndentTabs(v: boolean): void;
+  onSearchAllBuffers(v: boolean): void;
   onLowercaseTabs(v: boolean): void;
   onTabsSide(side: "top" | "left"): void;
   onDefaultLanguage(l: LangId): void;
@@ -129,21 +132,54 @@ export function buildSettingsPage(hooks: SettingsHooks): SettingsPage {
     }
   });
 
-  // Font size stepper.
-  const stepper = el("div", "stepper");
-  const minus = el("button", "stepbtn");
-  minus.innerHTML = "&minus;";
-  const val = el("span", "stepval");
-  const plus = el("button", "stepbtn");
-  plus.innerHTML = icons.plus;
-  const stepSize = (d: 1 | -1) => {
-    const cur = hooks.get().fontSize;
-    hooks.onFontSize(Math.max(FONT_MIN, Math.min(FONT_MAX, cur + d)));
-    sync();
+  // −/value/+ stepper factory. Returns the element plus a `set` for sync().
+  const makeStepper = (
+    read: () => number,
+    write: (n: number) => void,
+    min: number,
+    max: number
+  ) => {
+    const wrap = el("div", "stepper");
+    const minus = el("button", "stepbtn");
+    minus.innerHTML = "&minus;";
+    const val = el("span", "stepval");
+    const plus = el("button", "stepbtn");
+    plus.innerHTML = icons.plus;
+    const step = (d: 1 | -1) => {
+      write(Math.max(min, Math.min(max, read() + d)));
+      sync();
+    };
+    minus.addEventListener("click", () => step(-1));
+    plus.addEventListener("click", () => step(1));
+    wrap.append(minus, val, plus);
+    return { el: wrap, set: (text: string) => (val.textContent = text) };
   };
-  minus.addEventListener("click", () => stepSize(-1));
-  plus.addEventListener("click", () => stepSize(1));
-  stepper.append(minus, val, plus);
+
+  const stepper = makeStepper(() => hooks.get().fontSize, hooks.onFontSize, FONT_MIN, FONT_MAX);
+  const indentStepper = makeStepper(
+    () => hooks.get().indentSize,
+    hooks.onIndentSize,
+    INDENT_MIN,
+    INDENT_MAX
+  );
+
+  // Spaces vs real tab characters.
+  const indentSeg = el("div", "seg");
+  const indentBtns = new Map<boolean, HTMLButtonElement>();
+  for (const [tabs, label] of [
+    [false, "Spaces"],
+    [true, "Tabs"],
+  ] as [boolean, string][]) {
+    const b = el("button", "", label);
+    b.addEventListener("click", () => {
+      hooks.onIndentTabs(tabs);
+      sync();
+    });
+    indentBtns.set(tabs, b);
+    indentSeg.append(b);
+  }
+
+  const searchAllSw = makeSwitch(() => hooks.get().searchAllBuffers, hooks.onSearchAllBuffers);
 
   // Default language: custom dropdown (no native selects in this design).
   const langWrap = el("div", "dropwrap");
@@ -236,7 +272,7 @@ export function buildSettingsPage(hooks: SettingsHooks): SettingsPage {
     "Appearance",
     row("Theme", "Light, dark, or follow the OS", seg),
     row("Font", "Editor font family (fixed-width recommended)", fontInput),
-    row("Font size", `Base size in px — ${hint("zoomReset")} returns here`, stepper)
+    row("Font size", `Base size in px — ${hint("zoomReset")} returns here`, stepper.el)
   );
 
   section(
@@ -244,6 +280,13 @@ export function buildSettingsPage(hooks: SettingsHooks): SettingsPage {
     row("Wrap lines", `Soft-wrap long lines (good for prose) — ${hint("toggleWrap")}`, wrapSw),
     row("Minimap", "Tiny preview of the whole buffer on the right — click it to scroll", minimapSw),
     row("Highlight active line", "Shade the line the cursor is on", activeLineSw),
+    row("Indent width", "Columns per indent level, and how wide a tab renders", indentStepper.el),
+    row("Indent using", "What Tab inserts", indentSeg),
+    row(
+      "Search across buffers",
+      `Let ${hint("findInBuffers")} search every open buffer, not just this one`,
+      searchAllSw
+    ),
     row("Default language", "Syntax assumed for new buffers", langWrap),
     row("Lowercase tab titles", "Show buffer titles in all lowercase", lowerSw),
     row("Tab bar", "Tabs across the top, or down a resizable left sidebar", tabSeg)
@@ -286,10 +329,13 @@ export function buildSettingsPage(hooks: SettingsHooks): SettingsPage {
     setSwitch(wrapSw, s.wrapLines);
     setSwitch(minimapSw, s.minimap);
     setSwitch(activeLineSw, s.activeLine);
+    setSwitch(searchAllSw, s.searchAllBuffers);
     setSwitch(lowerSw, s.lowercaseTabs);
     setSwitch(devToolsSw, s.devTools);
+    for (const [tabs, b] of indentBtns) b.classList.toggle("on", s.indentTabs === tabs);
     if (document.activeElement !== fontInput) fontInput.value = s.fontFamily;
-    val.textContent = `${s.fontSize}px`;
+    stepper.set(`${s.fontSize}px`);
+    indentStepper.set(`${s.indentSize}`);
     langLabel.textContent = LANGS[s.defaultLanguage].label;
     const remotePairs: [HTMLInputElement, string][] = [
       [urlInput, s.remoteUrl],

@@ -30,7 +30,8 @@ not in a file. Everything else follows from taking that seriously:
   invisibly. There is no save prompt, no dirty-dot on the tab, no "do you want
   to keep your changes?" dialog anywhere in the product. Quit, reboot, crash —
   on the next launch every buffer is back, with its cursor, scroll position,
-  and language intact.
+  language and **undo history** intact: ⌘Z after a restart still walks back
+  through yesterday's edits.
 - **The title is the first line.** A buffer is named by its first non-empty
   line, live, as you type — the same way you'd skim a pile of notes. When you
   want a fixed name, pin one (the pin button in the status bar); pinned names
@@ -55,8 +56,22 @@ The editor is CodeMirror 6 dressed as Sublime: line numbers, a minimap with a
 floating auto-hiding scrollbar, soft wrap (⌥Z toggles), bracket matching,
 optional active-line highlight, and Sublime-style selection rendering down to
 the whitespace dots that appear only inside a selection. Find (⌘F) searches as
-you type; find-and-replace is ⌘⌥F. Text size adjusts like a browser
-(⌘+ / ⌘− / ⌘0).
+you type; find-and-replace is ⌘⌥F; ⌃G goes to a line (`120`, `+20`, `50%`,
+`12:4` all work). Text size adjusts like a browser (⌘+ / ⌘− / ⌘0). Indentation
+is yours to set — width, and spaces or real tabs (four spaces out of the box).
+
+The line-editing keys are Sublime's, and unlike most editors' they are *listed*:
+toggle comment, delete, move and duplicate a line, indent and outdent are
+ordinary commands in the Shortcuts tab and on the ⌘K keyboard map, so they can
+be found and rebound like everything else.
+
+The status bar counts words as well as characters — Buffers exists for text
+that's about to become an email or a prompt, and words are the unit those are
+measured in.
+
+⌘⇧F searches every open buffer at once, listing each hit under its buffer with
+the line number, and Enter jumps there. It's off until you turn it on in
+Settings (see "What Buffers is not").
 
 Syntax highlighting covers 49 languages. The language is auto-detected from
 the filename on import, and switchable any time from the status bar — the
@@ -143,9 +158,10 @@ a personal server, deliberately not treated as a high-value credential.
   or save-in-place. Files pass through it; they don't live in it.
 - **Not a sync service.** Machines never write to each other's state. There
   is no conflict resolution because there is nothing to conflict.
-- **Not a notes app.** No folders, no search across buffers, no tags, no
-  Markdown rendering. A buffer is working text, not an archive. (Cloud
-  stretches this the furthest — it holds keepers — but it's a shelf, not a
-  wiki.)
+- **Not a notes app.** No folders, no tags, no Markdown rendering. A buffer is
+  working text, not an archive. (Cloud stretches this the furthest — it holds
+  keepers — but it's a shelf, not a wiki. Searching across buffers stretches it
+  too, which is why it's a setting you turn on rather than something the app
+  assumes you want: it looks at the tabs you have open, not at a library.)
 - **Not an IDE.** No completion, no linting, no terminals. Syntax coloring is
   as far as it goes.

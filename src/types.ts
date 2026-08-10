@@ -18,6 +18,11 @@ export interface Settings {
   minimap: boolean;
   /** Highlight the line the cursor is on. */
   activeLine: boolean;
+  /** One indent level, in columns — Tab inserts this much, and a literal tab
+      renders this wide. */
+  indentSize: number;
+  /** Indent with real tab characters instead of spaces. */
+  indentTabs: boolean;
   /** Show tab names in all lowercase. */
   lowercaseTabs: boolean;
   /** Tabs across the top (default) or down a resizable left sidebar. */
@@ -26,6 +31,10 @@ export interface Settings {
   sidebarWidth: number;
   /** Language assumed for brand-new buffers. */
   defaultLanguage: LangId;
+  /** Let ⌘⇧F search every open buffer, not just the active one. Off by default:
+      a buffer is working text, not an archive (see PRODUCT.md), so the pile of
+      open tabs only becomes searchable when you ask for it. */
+  searchAllBuffers: boolean;
   /** Enable the Web Inspector (⌥⌘I). */
   devTools: boolean;
   /** Base URL of the Buffers server. Empty disables remote entirely. */
@@ -56,6 +65,11 @@ export interface BufferSnapshot {
   /** Full path of the linked file, or empty for an unsaved/unlinked buffer. When
       set, ⌘S saves straight there; unlinking clears it so ⌘S prompts again. */
   filePath?: string;
+  /** Serialized CodeMirror undo history (historyField.toJSON), so ⌘Z still
+      reaches yesterday's edits after a restart. Absent for buffers saved before
+      this existed, and for ones too large to be worth the file size — restore
+      falls back to a fresh history, which is what always used to happen. */
+  history?: unknown;
 }
 
 export interface Session {

@@ -32,6 +32,16 @@ export type CommandId =
   | "pushCloud"
   | "find"
   | "replace"
+  | "findInBuffers"
+  | "gotoLine"
+  | "toggleComment"
+  | "deleteLine"
+  | "moveLineUp"
+  | "moveLineDown"
+  | "duplicateLineUp"
+  | "duplicateLineDown"
+  | "indentMore"
+  | "indentLess"
   | "toggleWrap"
   | "zoomIn"
   | "zoomOut"
@@ -84,6 +94,26 @@ export const COMMANDS: Command[] = [
   // Editing
   { id: "find", label: "Find", short: "Find", group: "Editing", defaults: [`${MOD}+KeyF`] },
   { id: "replace", label: "Find & replace", short: "Replace", group: "Editing", defaults: [`${MOD}+Alt+KeyF`] },
+  // Off unless Settings → Editor → "Search across buffers" is on; the command is
+  // listed either way so the key is discoverable and rebindable.
+  { id: "findInBuffers", label: "Find in all buffers", short: "Find all", group: "Editing", defaults: [`${MOD}+Shift+KeyF`] },
+  // Sublime's binding, and Ctrl+G on both platforms (⌘G stays free for a
+  // find-next some day). Not ${MOD}: on macOS that would be ⌘G.
+  { id: "gotoLine", label: "Go to line", short: "Go to line", group: "Editing", defaults: ["Ctrl+KeyG"] },
+  // These eight came from CodeMirror's defaultKeymap, where they worked but were
+  // invisible in this tab and unrebindable. editor.ts prunes them from that
+  // keymap so the binding here is the only one — see EDITOR_COMMANDS.
+  // "Comment" is 50px of a 45px key cap — wide enough that the map would break
+  // it mid-word ("Comme/nt"). Abbreviated to fit; the Shortcuts tab and the
+  // key's tooltip both still say "Toggle comment".
+  { id: "toggleComment", label: "Toggle comment", short: "Cmnt", group: "Editing", defaults: [`${MOD}+Slash`] },
+  { id: "deleteLine", label: "Delete line", short: "Del line", group: "Editing", defaults: [`${MOD}+Shift+KeyK`] },
+  { id: "moveLineUp", label: "Move line up", short: "Move up", group: "Editing", defaults: ["Alt+ArrowUp"] },
+  { id: "moveLineDown", label: "Move line down", short: "Move down", group: "Editing", defaults: ["Alt+ArrowDown"] },
+  { id: "duplicateLineUp", label: "Duplicate line up", short: "Dup up", group: "Editing", defaults: ["Alt+Shift+ArrowUp"] },
+  { id: "duplicateLineDown", label: "Duplicate line down", short: "Dup down", group: "Editing", defaults: ["Alt+Shift+ArrowDown"] },
+  { id: "indentMore", label: "Indent", short: "Indent", group: "Editing", defaults: [`${MOD}+BracketRight`] },
+  { id: "indentLess", label: "Outdent", short: "Outdent", group: "Editing", defaults: [`${MOD}+BracketLeft`] },
 
   // View
   { id: "toggleWrap", label: "Toggle line wrap", short: "Wrap", group: "View", defaults: ["Alt+KeyZ"] },
@@ -195,11 +225,25 @@ export function mergeKeybindings(saved: unknown): Record<CommandId, string[]> {
   const base = defaultKeybindings();
   if (saved && typeof saved === "object") {
     const s = saved as Record<string, unknown>;
+    const fromSaved = new Set<CommandId>();
     for (const c of COMMANDS) {
       const v = s[c.id];
       // COPY, don't alias: the adopt step below pushes into these arrays, and
       // mutating the caller's object is a nasty surprise.
-      if (Array.isArray(v) && v.every((x) => typeof x === "string")) base[c.id] = [...(v as string[])];
+      if (Array.isArray(v) && v.every((x) => typeof x === "string")) {
+        base[c.id] = [...(v as string[])];
+        fromSaved.add(c.id);
+      }
+    }
+    // Commands added since the config was written aren't in it, so they arrive on
+    // their defaults — and a default may be a combo the user has already given to
+    // something else. Left alone the two would collide and one would silently
+    // lose (whichever the combo map happens to build last). The user's own choice
+    // wins; the new command comes up unbound, and the Shortcuts tab can assign it.
+    const taken = new Set<string>();
+    for (const id of fromSaved) for (const combo of base[id]) taken.add(combo);
+    for (const c of COMMANDS) {
+      if (!fromSaved.has(c.id)) base[c.id] = base[c.id].filter((combo) => !taken.has(combo));
     }
     // A saved config stores the FULL binding set, so a newly-added default stays
     // shadowed by an older snapshot forever. Adopt these for configs that

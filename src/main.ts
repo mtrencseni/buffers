@@ -1,8 +1,19 @@
 import "./styles.css";
 import { invoke, isTauri, onEvent } from "./ipc";
-import { FONT_MAX, FONT_MIN, SIDEBAR_MAX, SIDEBAR_MIN, hint as kbHint, persist, state } from "./state";
+import {
+  FONT_MAX,
+  FONT_MIN,
+  INDENT_MAX,
+  INDENT_MIN,
+  SIDEBAR_MAX,
+  SIDEBAR_MIN,
+  hint as kbHint,
+  persist,
+  state,
+} from "./state";
 import type { LangId, Theme } from "./types";
-import { Editor } from "./editor";
+import { Editor, type EditorCommandId } from "./editor";
+import { buildFindAll } from "./findall";
 import { initKeyboard } from "./keyboard";
 import { COMMANDS, mergeKeybindings, type CommandId } from "./commands";
 import { isMac } from "./platform";
@@ -102,6 +113,8 @@ class App {
   /** Cloud-delete toolbar button (Remote tab, Cloud selection only). */
   private delBtn = el("button", "tbtn");
   private delArmTimer = 0;
+  /** The find-in-all-buffers overlay while it's open (see findall.ts). */
+  private findAllEl: HTMLElement | null = null;
 
   async init(): Promise<void> {
     const [saved, session] = await Promise.all([
@@ -189,6 +202,19 @@ class App {
         this.showBuffers();
         this.editor.openFind();
       },
+      findInBuffers: () => this.openFindAll(),
+      // The editing commands CodeMirror used to own outright. Each returns CM's
+      // own verdict, so a key that doesn't apply (outdent at column 0) falls
+      // through instead of being swallowed.
+      gotoLine: () => this.runEditor("gotoLine"),
+      toggleComment: () => this.runEditor("toggleComment"),
+      deleteLine: () => this.runEditor("deleteLine"),
+      moveLineUp: () => this.runEditor("moveLineUp"),
+      moveLineDown: () => this.runEditor("moveLineDown"),
+      duplicateLineUp: () => this.runEditor("duplicateLineUp"),
+      duplicateLineDown: () => this.runEditor("duplicateLineDown"),
+      indentMore: () => this.runEditor("indentMore"),
+      indentLess: () => this.runEditor("indentLess"),
       toggleWrap: () => this.toggleWrap(),
       keyboardMap: () => toggleKeyboardMap(),
       zoomIn: () => this.zoomStep(1),
@@ -261,6 +287,14 @@ class App {
       if (typeof s.fontSize === "number") state.settings.fontSize = clamp(s.fontSize, FONT_MIN, FONT_MAX);
       if (typeof s.wrapLines === "boolean") state.settings.wrapLines = s.wrapLines;
       if (typeof s.minimap === "boolean") state.settings.minimap = s.minimap;
+      // activeLine was missing from this allowlist, which is exactly the failure
+      // the gotcha below describes: the toggle worked, and forgot itself on quit.
+      if (typeof s.activeLine === "boolean") state.settings.activeLine = s.activeLine;
+      if (typeof s.indentSize === "number")
+        state.settings.indentSize = clamp(Math.round(s.indentSize), INDENT_MIN, INDENT_MAX);
+      if (typeof s.indentTabs === "boolean") state.settings.indentTabs = s.indentTabs;
+      if (typeof s.searchAllBuffers === "boolean")
+        state.settings.searchAllBuffers = s.searchAllBuffers;
       if (typeof s.lowercaseTabs === "boolean") state.settings.lowercaseTabs = s.lowercaseTabs;
       if (s.tabsSide === "left" || s.tabsSide === "top") state.settings.tabsSide = s.tabsSide;
       if (typeof s.sidebarWidth === "number")
@@ -721,6 +755,20 @@ class App {
         this.editor.applyActiveLine();
         persist();
       },
+      onIndentSize: (n) => {
+        state.settings.indentSize = n;
+        this.editor.applyIndent();
+        persist();
+      },
+      onIndentTabs: (v) => {
+        state.settings.indentTabs = v;
+        this.editor.applyIndent();
+        persist();
+      },
+      onSearchAllBuffers: (v) => {
+        state.settings.searchAllBuffers = v;
+        persist();
+      },
       onLowercaseTabs: (v) => {
         state.settings.lowercaseTabs = v;
         this.syncTitles();
@@ -873,6 +921,47 @@ class App {
     }
   }
 
+  /** Run one of the CodeMirror editing commands the registry owns. Returning
+      false on a system tab leaves the key to the browser — these all act on
+      buffer text, and Settings has none. */
+  private runEditor(id: EditorCommandId): boolean {
+    if (this.activeSys !== null) return false;
+    return this.editor.run(id);
+  }
+
+  // ---- find in all buffers (⌘⇧F) ---------------------------------------------
+
+  private openFindAll(): void {
+    if (!state.settings.searchAllBuffers) {
+      toast("Searching all buffers is off — turn it on in Settings");
+      return;
+    }
+    if (this.findAllEl) return;
+    const picker = buildFindAll({
+      buffers: this.editor.all(),
+      initial: this.editor.selectedText(),
+      onPick: (id, from, to) => {
+        this.closeFindAll();
+        this.showBuffers();
+        this.editor.reveal(id, from, to);
+        this.syncActiveTabClass();
+        this.syncStatus();
+      },
+      onClose: () => {
+        this.closeFindAll();
+        this.editor.view.focus();
+      },
+    });
+    document.body.append(picker.el);
+    this.findAllEl = picker.el;
+    picker.focus();
+  }
+
+  private closeFindAll(): void {
+    this.findAllEl?.remove();
+    this.findAllEl = null;
+  }
+
   private rebuildComboMap(): void {
     const m = new Map<string, CommandId>();
     for (const cmd of COMMANDS) {
@@ -981,7 +1070,11 @@ class App {
 
   syncStatus(): void {
     const s = this.editor.status();
-    const parts = [`Ln ${s.line}, Col ${s.col}`, `${s.chars.toLocaleString()} chars`];
+    const parts = [
+      `Ln ${s.line}, Col ${s.col}`,
+      `${s.words.toLocaleString()} word${s.words === 1 ? "" : "s"}`,
+      `${s.chars.toLocaleString()} chars`,
+    ];
     if (s.selected > 0) parts.push(`${s.selected.toLocaleString()} selected`);
     this.statusLeft.textContent = parts.join("  ·  ");
     this.langBtn.textContent = LANGS[this.editor.language()].label;
