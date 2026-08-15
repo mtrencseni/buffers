@@ -23,6 +23,7 @@ header on every API endpoint. `/ping` is deliberately open.
 | Method | Path | Does |
 | --- | --- | --- |
 | `PUT` | `/api/v1/<user>/<host>` | Replace this machine's buffers wholesale (body = payload below). |
+| `DELETE` | `/api/v1/<user>/<host>` | Forget a machine entirely — its buffers and its history. |
 | `POST` | `/api/v1/<user>/cloud` | Add or overwrite **one** Cloud buffer. Body `{name, language, text}`. |
 | `DELETE` | `/api/v1/<user>/cloud` | Remove **one** Cloud buffer. Name from `{"name": …}` or `?name=`. |
 | `GET` | `/api/v1/<user>` | Every host and the Cloud, with all their buffers, newest first. |
@@ -34,6 +35,15 @@ Cloud buffers additionally carry `pushed_at`.
 
 A machine may **not** wholesale-push to `Cloud` — that returns `409`. Otherwise a
 laptop that happened to be named `cloud` would wipe the store on its first push.
+Nor may it be deleted as a host (also `409`): a mirror is disposable because its
+client rebuilds it, while the Cloud is the curated copy, so there is deliberately
+no one-shot way to wipe it — delete its buffers one at a time.
+
+Deleting a machine that is still running only clears it until that machine's next
+push, seconds later. The operation is for retired hardware and stale hostnames.
+Deleted hosts leave a tombstone in `data/<user>/.trash/<host>-<stamp>.json` (the
+newest 20 survive), which is not exposed by the API — it's there so a wrongly
+deleted machine can be `mv`'d back by hand.
 
 Buffer names are only ever dict keys inside the stored JSON, never path
 components, so a title containing `/` or unicode needs no escaping. Host names
@@ -59,8 +69,9 @@ at 8 MB total, since nothing prunes it but you.
 The filesystem, one file per host:
 
 ```
-data/<user>/<host>.json              # current state
+data/<user>/<host>.json                  # current state
 data/<user>/<host>.history/<date>.json   # last 20 daily snapshots
+data/<user>/.trash/<host>-<stamp>.json   # last 20 deleted hosts
 ```
 
 Writes are atomic (write-tmp-then-rename). The history exists for one specific

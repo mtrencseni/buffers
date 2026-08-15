@@ -16,10 +16,16 @@ Two kinds of host live side by side, and a GET returns both the same way:
     copies a Cloud buffer locally if it wants to keep working on it.
 
     PUT     /api/v1/<user>/<host>   replace this machine's buffers wholesale
+    DELETE  /api/v1/<user>/<host>   forget a machine entirely (retired hardware)
     POST    /api/v1/<user>/cloud    add or overwrite ONE Cloud buffer, by name
     DELETE  /api/v1/<user>/cloud    remove ONE Cloud buffer, by name
     GET     /api/v1/<user>          every host and the Cloud, with all buffers
     GET     /ping                   liveness, no auth
+
+Note the two DELETEs: on a machine it forgets the whole host, on the Cloud it
+removes one named buffer. That asymmetry is deliberate -- a machine mirror is
+disposable (its client rebuilds it on the next push) while the Cloud is the
+curated copy, so there is no one-shot way to wipe it.
 
 The payload a client pushes, and what comes back per host:
 
@@ -41,6 +47,7 @@ import hmac
 import json
 import os
 import re
+import shutil
 import threading
 import time
 from datetime import datetime, timezone
@@ -55,6 +62,7 @@ NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 MAX_BYTES = 1024 * 1024          # 1 MB per request; notes, not attachments
 CLOUD_MAX_BYTES = 8 * 1024 * 1024  # the Cloud only grows, so give it a ceiling
 HISTORY_DAYS = 20                # daily snapshots kept per host (see rotate())
+TRASH_KEEP = 20                  # deleted hosts recoverable from .trash (see trash())
 
 # The Cloud is a host name like any other on read, so clients need no special
 # case to display it. Machines may not push to it: a laptop that happened to be
@@ -123,6 +131,31 @@ def rotate(user: str, host: str, current) -> None:
         days = sorted(f for f in os.listdir(hdir) if f.endswith(".json"))
         for stale in days[:-HISTORY_DAYS]:      # names sort chronologically
             os.remove(os.path.join(hdir, stale))
+    except OSError:
+        pass
+
+
+def trash(user: str, host: str, path: str) -> None:
+    """Move a host's current state aside instead of unlinking it.
+
+    Deleting a host also deletes its daily history, so the operation would
+    otherwise be the one thing here with no way back. The tombstone is a plain
+    file under data/<user>/.trash/ -- not exposed by the API, just something to
+    `mv` back when someone deletes the wrong machine. Newest TRASH_KEEP survive.
+    """
+    if not os.path.exists(path):
+        return
+    tdir = os.path.join(DATA_DIR, user, ".trash")
+    os.makedirs(tdir, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    os.replace(path, os.path.join(tdir, f"{host}-{stamp}.json"))
+    try:
+        kept = sorted(
+            (os.path.join(tdir, f) for f in os.listdir(tdir) if f.endswith(".json")),
+            key=os.path.getmtime,
+        )
+        for stale in kept[:-TRASH_KEEP]:
+            os.remove(stale)
     except OSError:
         pass
 
@@ -218,6 +251,37 @@ def push(user: str, host: str):
     write_json(path, doc)
     return jsonify(ok=True, host=host, received_at=doc["received_at"],
                    buffers=len(payload["buffers"]))
+
+
+@app.delete("/api/v1/<user>/<host>")
+def host_delete(user: str, host: str):
+    """Forget a machine entirely: its buffers and its history both.
+
+    For retired hardware and stale hostnames. Deleting a machine that is still
+    running only clears it until its next push, seconds later -- that is
+    expected, not a bug.
+
+    Werkzeug matches the static /cloud rule ahead of this dynamic one, so
+    DELETE .../cloud still means "remove one Cloud buffer". That only holds for
+    the exact lowercase spelling though, so the reserved-name guard below is
+    what actually stops DELETE .../Cloud from wiping the curated store.
+    """
+    if not authorized():
+        return jsonify(error="unauthorized"), 401
+    if not NAME_RE.match(user) or not NAME_RE.match(host):
+        return jsonify(error="bad user or host name"), 400
+    if host.lower() == CLOUD_HOST.lower():
+        return jsonify(error=f"{CLOUD_HOST} is a store, not a machine; "
+                             f"delete its buffers one at a time"), 409
+
+    path = host_path(user, host)
+    hdir = os.path.join(DATA_DIR, user, host + ".history")
+    if not os.path.exists(path) and not os.path.isdir(hdir):
+        return jsonify(error=f"no host named {host!r}"), 404
+
+    trash(user, host, path)          # recoverable by hand; see trash()
+    shutil.rmtree(hdir, ignore_errors=True)
+    return jsonify(ok=True, host=host)
 
 
 @app.post("/api/v1/<user>/cloud")
