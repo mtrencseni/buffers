@@ -23,7 +23,8 @@ import {
   sublimeSelection,
 } from "./editor-core";
 import { isLangId, LANGS } from "./langs";
-import { state } from "./state";
+import { isTouch } from "./platform";
+import { minimapOn, state } from "./state";
 import { icons } from "./icons";
 import { toast } from "./toast";
 import type { RemoteBuffer, RemoteData, RemoteHost } from "./remote";
@@ -102,10 +103,19 @@ async function copyText(text: string): Promise<void> {
 /** A read-only editor state that renders — and handles — exactly like the real
     editor: same highlight style, syntax, selection layer, minimap and find. The
     readOnly facet blocks every edit, but the view stays interactive: a live
-    cursor, keyboard/mouse selection, and native ⌘C copy. (No editable(false):
-    that would kill the cursor. And the custom selection pieces are mandatory,
-    not cosmetic — editor-core.css hides the NATIVE selection inside .edhost,
-    so without drawSelection + sublimeSelection a selection would be invisible.) */
+    cursor, keyboard/mouse selection, and native ⌘C copy. (No editable(false)
+    with a mouse: that would kill the cursor. And the custom selection pieces are
+    mandatory, not cosmetic — editor-core.css hides the NATIVE selection inside
+    .edhost, so without drawSelection + sublimeSelection a selection would be
+    invisible.)
+
+    ON TOUCH that trade inverts. `editable` is what makes the content
+    contentEditable, and tapping contentEditable is what raises the on-screen
+    keyboard — half the screen, to type into text that cannot be typed into. So
+    a touch device gets `editable(false)`, loses the CM cursor it had no use for,
+    and selects with the platform's own long-press handles instead. The custom
+    layers come off with it (they would paint a stale CM selection under the real
+    one) and styles.css restores the native selection colour for this pane. */
 function previewState(buf: RemoteBuffer): EditorState {
   const lang = isLangId(buf.language) ? buf.language : "plain";
   const syntax = LANGS[lang].syntax();
@@ -115,11 +125,28 @@ function previewState(buf: RemoteBuffer): EditorState {
       EditorState.readOnly.of(true),
       lineNumbers(),
       highlightSpecialChars(),
-      drawSelection(),
-      sublimeSelection,
-      selectionWhitespace,
+      isTouch
+        ? [
+            EditorView.editable.of(false),
+            // The facet already resolves `contenteditable` to "false"; setting
+            // it here as well is deliberate belt-and-braces, because a single
+            // stray provider of the `editable` facet (it combines by taking the
+            // FIRST value) would silently hand the keyboard back. A provider
+            // overrides CM's computed attribute, so this is the last word.
+            //
+            // inputmode="none" is the part that mobile browsers read directly:
+            // "focus this, but do not raise a keyboard for it". role/aria drop
+            // the textbox semantics that go with it — this is text to read.
+            EditorView.contentAttributes.of({
+              contenteditable: "false",
+              inputmode: "none",
+              role: "document",
+              "aria-multiline": "false",
+            }),
+          ]
+        : [drawSelection(), sublimeSelection, selectionWhitespace],
       highlightSelectionMatches(),
-      state.settings.minimap ? minimapExtension() : [],
+      minimapOn() ? minimapExtension() : [],
       overlayScrollbar,
       state.settings.wrapLines ? EditorView.lineWrapping : [],
       syntaxHighlighting(highlight),
@@ -164,14 +191,27 @@ export function buildRemotePage(hooks: RemoteHooks): RemotePage {
   body.append(hostsEl, bufsEl, previewWrap);
   root.append(bar, body);
 
-  // One persistent read-only view; selecting a buffer swaps its state in.
-  const view = new EditorView({ parent: edHost });
+  // One persistent read-only view; selecting a buffer swaps its state in. It is
+  // seeded with an empty previewState rather than constructed bare: a bare
+  // EditorView has no extensions, so it comes up EDITABLE (the facet's default)
+  // and stays that way until the first setState — a live contentEditable in the
+  // DOM, on a touch device, before anything has been selected.
+  const view = new EditorView({
+    parent: edHost,
+    state: previewState({ name: "", language: "plain", text: "" }),
+  });
 
   // Right-click: the NATIVE context menu on a contenteditable offers Cut /
   // Paste / spellcheck — edit commands that can't apply to a read-only buffer
   // and would just no-op confusingly. The webview can't drop items from its
   // native menu, but it honors preventDefault — so replace it with a small
   // menu of exactly what works here: Copy (of the selection) and Select all.
+  //
+  // None of that reasoning holds on touch. A long press there is the OS's own
+  // select-and-copy gesture, and it fires `contextmenu` on the way — so this
+  // menu appeared *alongside* the platform's selection bar, two menus for one
+  // press, ours pointing at a CM selection the finger never made. The platform's
+  // is the better menu here anyway (it grew the handles), so leave it alone.
   let ctxMenu: HTMLElement | null = null;
   const closeCtxMenu = () => {
     ctxMenu?.remove();
@@ -189,7 +229,7 @@ export function buildRemotePage(hooks: RemoteHooks): RemotePage {
       closeCtxMenu();
     }
   };
-  edHost.addEventListener("contextmenu", (e) => {
+  if (!isTouch) edHost.addEventListener("contextmenu", (e) => {
     e.preventDefault();
     closeCtxMenu();
     const menu = el("div", "droplist ctxmenu");

@@ -30,6 +30,23 @@ export interface SettingsHooks {
   remoteTest(): Promise<string>;
   /** Push health for the status row. */
   remoteStatus(): { lastPushAt: number; lastError: string };
+  /** What this build can actually offer. The page renders what is true here
+      rather than what the Settings type happens to contain — a browser has no
+      Web Inspector, and a phone has no keys to rebind. */
+  caps: SettingsCaps;
+}
+
+export interface SettingsCaps {
+  /** Web build: the server IS the origin that served this page, so URL, user
+      and token aren't settings — the login cookie is the credential, and those
+      rows would only offer ways to break it. */
+  fixedRemote: boolean;
+  /** There is a keyboard worth configuring (false on touch devices). */
+  keyboard: boolean;
+  /** Tauri only — nothing in a browser to point a Web Inspector toggle at. */
+  devTools: boolean;
+  /** Web build: end this browser's session and return to the login page. */
+  signOut?: () => void;
 }
 
 export interface SettingsPage {
@@ -268,54 +285,119 @@ export function buildSettingsPage(hooks: SettingsHooks): SettingsPage {
 
   const statusEl = el("div", "sethint remote-pushstatus");
 
+  const signOutBtn = el("button", "kbreset", "Sign out");
+  signOutBtn.addEventListener("click", () => hooks.caps.signOut?.());
+
+  // Shortcuts appear in these hints only when there are shortcuts: hint() is
+  // empty on a touch device, and a sentence built around a missing key reads
+  // like a bug ("Base size in px —  returns here").
+  const withKey = (id: string, withHint: (k: string) => string, without: string) => {
+    const k = hint(id);
+    return k ? withHint(k) : without;
+  };
+
+  const caps = hooks.caps;
+
   section(
     "Appearance",
     row("Theme", "Light, dark, or follow the OS", seg),
     row("Font", "Editor font family (fixed-width recommended)", fontInput),
-    row("Font size", `Base size in px — ${hint("zoomReset")} returns here`, stepper.el)
+    row(
+      "Font size",
+      withKey("zoomReset", (k) => `Base size in px — ${k} returns here`, "Base size in px"),
+      stepper.el
+    )
   );
 
-  section(
-    "Editor",
-    row("Wrap lines", `Soft-wrap long lines (good for prose) — ${hint("toggleWrap")}`, wrapSw),
-    row("Minimap", "Tiny preview of the whole buffer on the right — click it to scroll", minimapSw),
+  const editorRows = [
+    row(
+      "Wrap lines",
+      withKey(
+        "toggleWrap",
+        (k) => `Soft-wrap long lines (good for prose) — ${k}`,
+        "Soft-wrap long lines (good for prose)"
+      ),
+      wrapSw
+    ),
+    // The minimap is a hover-and-drag target; on touch the editor never shows
+    // one whatever this says, so don't offer the switch.
+    ...(caps.keyboard
+      ? [
+          row(
+            "Minimap",
+            "Tiny preview of the whole buffer on the right — click it to scroll",
+            minimapSw
+          ),
+        ]
+      : []),
     row("Highlight active line", "Shade the line the cursor is on", activeLineSw),
     row("Indent width", "Columns per indent level, and how wide a tab renders", indentStepper.el),
     row("Indent using", "What Tab inserts", indentSeg),
     row(
       "Search across buffers",
-      `Let ${hint("findInBuffers")} search every open buffer, not just this one`,
+      withKey(
+        "findInBuffers",
+        (k) => `Let ${k} search every open buffer, not just this one`,
+        "Search every open buffer, not just this one"
+      ),
       searchAllSw
     ),
     row("Default language", "Syntax assumed for new buffers", langWrap),
     row("Lowercase tab titles", "Show buffer titles in all lowercase", lowerSw),
-    row("Tab bar", "Tabs across the top, or down a resizable left sidebar", tabSeg)
-  );
+    row("Tab bar", "Tabs across the top, or down a resizable left sidebar", tabSeg),
+  ];
+  section("Editor", ...editorRows);
 
-  section(
-    "Keyboard",
-    row("Keyboard shortcuts", "View and customize every key binding", kbBtn)
-  );
+  if (caps.keyboard) {
+    section("Keyboard", row("Keyboard shortcuts", "View and customize every key binding", kbBtn));
+  }
 
-  section(
-    "Remote",
-    row("Server URL", "Buffers server to publish to and read from", urlInput),
-    row("User", "Account name on the server", userInput),
-    row("This machine", "The name this machine publishes under", hostInput),
-    row("Token", "Shared secret (sent as X-Buffers-Token)", tokenInput),
-    row("Publish from this machine", "Push open buffers a few seconds after edits", pushSw),
-    row("Connection", "Checks the URL and token with a real request", testWrap),
-    statusEl
-  );
-
-  section(
-    "Advanced",
+  // In the web build the server is whoever served this page, so the only remote
+  // decisions left are what this browser calls itself and whether it publishes.
+  const client = caps.fixedRemote ? "browser" : "machine";
+  const remoteRows: HTMLElement[] = [];
+  if (!caps.fixedRemote) {
+    remoteRows.push(
+      row("Server URL", "Buffers server to publish to and read from", urlInput),
+      row("User", "Account name on the server", userInput)
+    );
+  }
+  remoteRows.push(
     row(
-      "Developer mode",
-      `Web Inspector (${hint("devtools")}) and the Inspect item in the right-click menu`,
-      devToolsSw
+      caps.fixedRemote ? "This browser" : "This machine",
+      caps.fixedRemote
+        ? "The name this browser publishes under — every browser is its own client"
+        : "The name this machine publishes under",
+      hostInput
     )
   );
+  if (!caps.fixedRemote) {
+    remoteRows.push(row("Token", "Shared secret (sent as X-Buffers-Token)", tokenInput));
+  }
+  remoteRows.push(
+    row(`Publish from this ${client}`, "Push open buffers a few seconds after edits", pushSw),
+    row(
+      "Connection",
+      caps.fixedRemote ? "Checks the server with a real request" : "Checks the URL and token with a real request",
+      testWrap
+    ),
+    statusEl
+  );
+  if (caps.signOut) {
+    remoteRows.push(row("Session", "Forget the sign-in on this browser", signOutBtn));
+  }
+  section("Remote", ...remoteRows);
+
+  if (caps.devTools) {
+    section(
+      "Advanced",
+      row(
+        "Developer mode",
+        `Web Inspector (${hint("devtools")}) and the Inspect item in the right-click menu`,
+        devToolsSw
+      )
+    );
+  }
 
   const setSwitch = (s: HTMLElement, on: boolean) => {
     s.classList.toggle("on", on);

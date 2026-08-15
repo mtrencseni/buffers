@@ -21,6 +21,9 @@ localStorage and fakes the remote server with canned data — so the entire
 app, including hot exit and the Remote tab, runs and is testable in an
 ordinary browser.
 
+That property is what made the web UI cheap, and there is now a third
+backend behind the same surface (see "The web build" below).
+
 ## The editor: one view, many states
 
 The single most important design decision is how buffers relate to the
@@ -121,6 +124,62 @@ an empty session over a machine's good state. Machine hostnames are
 sanitized in Rust to the server's allowed charset, because a host name
 becomes a path component on the server.
 
+## The web build
+
+The same frontend, built a second way (`vite build --mode web`) and served by
+the Buffers server itself, is a full client in a browser — desktop or phone,
+Mac or Windows. Not a viewer: each browser has its own session, its own
+generated host name, and pushes wholesale under it exactly like a laptop does.
+Two browsers on one machine are two clients, which is the intent.
+
+Three things make it work, and all three follow from one decision — that the
+server which holds the data also serves the page:
+
+**Same origin.** The desktop app must route HTTP through Rust because the
+webview's CSP blocks `fetch()` to a user-configured server. Here 'self' *is*
+the server, so `src/web.ts` calls the API directly: no CORS, no configured
+URL, no token in JavaScript. `remoteUrl` is pinned to `location.origin` and
+`remoteUser` comes from `/api/whoami`; neither is a setting in this build.
+
+**A cookie, not a token.** `/login` takes the shared secret once and sets a
+signed, HttpOnly, year-long session cookie; the API accepts either that or the
+`X-Buffers-Token` header, so desktop clients are untouched. The key that signs
+it derives from the token, so rotating the token logs every browser out with no
+second secret to manage. A 401 sends the app to `/login` **only at boot** —
+mid-session it surfaces as an ordinary error, because navigating away from a
+live editor to fix a background push is the worse trade.
+
+**A different storage floor.** The session moves to IndexedDB (`src/idb.ts`):
+localStorage's ~5 MB quota is reachable now that buffers carry undo history,
+and its synchronous writes stall the main thread on a phone. The sharper
+problem is that iOS Safari *evicts* script-writable storage after seven idle
+days — a cleared session that looks like a normal launch, which would then
+publish empty over the client's own good server state. `requestPersistence()`
+asks for an exemption, Add to Home Screen actually gets one, and
+`noteRestoredSession()` refuses to auto-push an empty payload from a cold start
+that restored nothing. The server's daily history is the net under all of that.
+
+Two axes shape the UI, deliberately kept independent: `isTouch` (no mouse, no
+keyboard — tap targets grow, the minimap and the shortcut UI disappear, and
+selection is handed back to the platform so iOS can attach its own handles) and
+a width breakpoint (the chrome re-flows to a scrolling tab strip plus a bottom
+action bar, and the Remote tab's three panes stack into two). A narrow desktop
+window gets the layout without the touch rules; a tablet in landscape gets the
+touch rules without the layout.
+
+The Remote preview is where the touch axis bites hardest, because everything
+that makes it good with a mouse is wrong under a finger. It stays
+contentEditable on the desktop so it can have a real cursor; on touch that same
+property raises the on-screen keyboard over text nobody can type into, so it
+becomes `editable(false)` and gives selection back to the platform. It replaces
+the native context menu on the desktop, where that menu offers Cut and Paste
+that cannot apply; on touch the long press *is* the copy gesture, so ours only
+competed with it. Neither is a special case bolted on — each is the same
+question (who owns this interaction?) answered differently for each input.
+
+What a browser can't have: linked files (import reads content, save downloads a
+copy), the native menu, devtools, and Delight's "edit in Buffers" handoff.
+
 ## The keyboard system
 
 Identical in design to Delight's, because it was copied from there: every
@@ -133,7 +192,9 @@ plus one handler; nothing else needs to know.
 ## Platform partitioning
 
 Every OS difference lives in one of five seams — `platform.ts` (`isMac`,
-`MOD`; the only OS branch in the frontend), the `.mac` root CSS class,
+`MOD`, `isTouch`; the only OS/input branch in the frontend, and the reason the
+web UI gets ⌘ in Mac Chrome and Ctrl in Windows Chrome for free), the `.mac`
+root CSS class,
 Rust `#[cfg]` blocks, per-OS `tauri.<os>.conf.json` overlays, and
 `scripts/prebuild.mjs` — and nowhere else. The most visible consequence:
 macOS gets a real menu bar, Windows gets none (a Win32 menu draws in system
@@ -152,6 +213,10 @@ itself are written atomically:
 | `settings.json` | Settings, keybindings, zoom | debounced on change |
 | `.window-state.json` | Window bounds | on focus loss (plugin) |
 | `.remote-cache.json` | Last successful Remote fetch | after each fetch |
+
+In the web build the same four map onto browser storage: the session and the
+remote cache into IndexedDB, settings into localStorage, and window bounds
+have no meaning.
 
 One trap that recurs: `restoreSettings()` in `main.ts` is a per-field
 allowlist. A new setting that isn't added there will accept values, work all
@@ -182,5 +247,7 @@ the most when forgotten:
   build, sometimes only at its next `tsc`).
 - Adding a setting without extending the `restoreSettings()` allowlist
   (silently fails to persist).
+- `append`-ing into a chrome container in `applyTabsLayout` instead of
+  `replaceChildren` (three layouts now share those elements).
 - Trusting CodeMirror's cached line metrics after a font change (route
   changes through the font compartment, not bare CSS).

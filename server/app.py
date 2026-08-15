@@ -20,12 +20,29 @@ Two kinds of host live side by side, and a GET returns both the same way:
     POST    /api/v1/<user>/cloud    add or overwrite ONE Cloud buffer, by name
     DELETE  /api/v1/<user>/cloud    remove ONE Cloud buffer, by name
     GET     /api/v1/<user>          every host and the Cloud, with all buffers
+    GET     /api/whoami             who the session belongs to (the web UI asks)
     GET     /ping                   liveness, no auth
 
 Note the two DELETEs: on a machine it forgets the whole host, on the Cloud it
 removes one named buffer. That asymmetry is deliberate -- a machine mirror is
 disposable (its client rebuilds it on the next push) while the Cloud is the
 curated copy, so there is no one-shot way to wipe it.
+
+This server also SERVES the Buffers web UI, when server/web/ holds a build of it
+(pnpm build:web; see build-web.sh). That is what makes the web client possible at
+all: a browser page can only fetch() the API without CORS if the API is its own
+origin, which it is because the same Flask app handed it the page. The desktop
+clients are unaffected -- they still speak to /api/v1 from Rust.
+
+Two ways in, then, and authorized() takes either:
+
+  * X-Buffers-Token, for the desktop clients. A secret in a config file.
+  * A signed session cookie, for browsers, set by /login when you paste that same
+    token once. HttpOnly, so the page's own JavaScript cannot read it back --
+    which is the point: a browser never holds the token, only the session.
+
+The cookie is signed with a key DERIVED from BUFFERS_TOKEN, so rotating the token
+invalidates every browser session for free.
 
 The payload a client pushes, and what comes back per host:
 
@@ -37,22 +54,35 @@ on the server is worth more than any query the alternative would buy. Buffer
 NAMES are only ever dict keys inside those files, never path components, so a
 title containing "/" or unicode needs no escaping anywhere.
 
-Auth is a single shared secret in BUFFERS_TOKEN, sent as X-Buffers-Token. Not
-user accounts -- just enough that a public URL isn't a public notepad.
+Auth is a single shared secret in BUFFERS_TOKEN. Not user accounts -- just enough
+that a public URL isn't a public notepad.
 
-Env: BUFFERS_TOKEN (required), BUFFERS_DATA_DIR (default ./data), PORT (8060).
+Env: BUFFERS_TOKEN (required), BUFFERS_DATA_DIR (default ./data), PORT (8060),
+BUFFERS_USER (default mtrencseni -- who the web UI signs in as),
+BUFFERS_INSECURE_COOKIE (set it to test the web UI over plain http on localhost;
+never in production, it drops the Secure flag from the session cookie).
 """
 
+import hashlib
 import hmac
+import html
 import json
 import os
 import re
 import shutil
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from flask import Flask, jsonify, request
+from flask import (
+    Flask,
+    abort,
+    jsonify,
+    redirect,
+    request,
+    send_from_directory,
+    session,
+)
 
 # A <user> or <host> becomes a path component, so it goes through an allowlist
 # rather than an escape: must start alphanumeric, then word chars / . / - / _.
@@ -74,13 +104,45 @@ DATA_DIR = os.environ.get(
 )
 TOKEN = os.environ.get("BUFFERS_TOKEN", "")
 
+# The single account the web UI signs in as. There is one user here (see the
+# module docstring); this exists so the name isn't spelled into the frontend.
+WEB_USER = os.environ.get("BUFFERS_USER", "mtrencseni")
+
+# A build of the web UI, if one has been put here (build-web.sh). Absent is a
+# supported state: the server then behaves exactly as it did before it could
+# serve a UI at all.
+WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+
+# Everything under these prefixes is part of that build and served as-is. An
+# allowlist rather than a blanket static mount: with a blanket one, every path
+# that isn't an API route becomes a file probe against the server's directory.
+WEB_PREFIXES = ("assets/", "fonts/", "icons/")
+WEB_FILES = frozenset(
+    {"manifest.webmanifest", "favicon.png", "apple-touch-icon.png", "index.html"}
+)
+
 # Cloud writes are read-modify-write on one file, so they are serialized. Machine
 # pushes need no lock: each replaces its own file in a single atomic rename.
 cloud_lock = threading.Lock()
 
-app = Flask(__name__)
+# static_folder=None: the routes below decide what is servable, not Flask's
+# catch-all static rule (which would also shadow nothing but is one more way in).
+app = Flask(__name__, static_folder=None)
 # Flask rejects an oversized body itself (413) before we ever read it.
 app.config["MAX_CONTENT_LENGTH"] = MAX_BYTES
+app.config.update(
+    # Derived from the token, so rotating BUFFERS_TOKEN invalidates every browser
+    # session without a second secret to manage or a store to clear.
+    SECRET_KEY=hashlib.sha256(("buffers-session:" + TOKEN).encode()).digest(),
+    SESSION_COOKIE_HTTPONLY=True,
+    # Lax is also the CSRF story: a cross-site POST/PUT/DELETE carries no cookie,
+    # so the mutating endpoints can't be driven from another origin.
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=not os.environ.get("BUFFERS_INSECURE_COOKIE"),
+    # Long-lived on purpose: re-typing a 64-character token on a phone is exactly
+    # the friction that makes people pick a shorter secret.
+    PERMANENT_SESSION_LIFETIME=timedelta(days=365),
+)
 
 
 # ---- storage -----------------------------------------------------------------
@@ -173,8 +235,14 @@ def envelope(host: str, buffers: list) -> dict:
 # ---- request plumbing ---------------------------------------------------------
 
 def authorized() -> bool:
+    """Either credential is enough: the shared token in a header (desktop
+    clients) or a signed session cookie (a browser that pasted it at /login)."""
+    if not TOKEN:
+        return False
     sent = request.headers.get("X-Buffers-Token", "")
-    return bool(TOKEN) and hmac.compare_digest(sent, TOKEN)
+    if sent and hmac.compare_digest(sent, TOKEN):
+        return True
+    return session.get("auth") is True
 
 
 def clean_buffer(item) -> dict:
@@ -225,9 +293,162 @@ def ping():
     return jsonify(ok=True)
 
 
+# ---- the web UI ------------------------------------------------------------------
+#
+# Serving the bundle from here is not a convenience, it is the mechanism: the
+# page and the API share an origin, so the frontend can fetch() the API with no
+# CORS and no configured URL, and the browser will attach the session cookie.
+
+def web_built() -> bool:
+    return os.path.isfile(os.path.join(WEB_DIR, "index.html"))
+
+
+def send_web(filename: str, cache: str):
+    resp = send_from_directory(WEB_DIR, filename)
+    resp.headers["Cache-Control"] = cache
+    return resp
+
+
+LOGIN_PAGE = """<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Buffers</title>
+<style>
+  :root {{ --bg:#eceef2; --panel:#fff; --text:#1b1f27; --dim:#69707d;
+           --border:#dcdfe6; --accent:#4f7cf7; --err:#b3261e; }}
+  @media (prefers-color-scheme: dark) {{
+    :root {{ --bg:#262e38; --panel:#303841; --text:#d8dee9; --dim:#a6acb8;
+             --border:#414c59; --accent:#6699cc; --err:#ff8f88; }}
+  }}
+  * {{ box-sizing: border-box; }}
+  body {{ margin:0; min-height:100dvh; display:grid; place-items:center;
+          background:var(--bg); color:var(--text); padding:1.5rem;
+          font:15px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif; }}
+  form {{ width:100%; max-width:22rem; background:var(--panel); padding:1.5rem;
+          border:1px solid var(--border); border-radius:.75rem; }}
+  h1 {{ margin:0 0 .25rem; font-size:1.375rem; }}
+  p {{ margin:0 0 1.25rem; color:var(--dim); font-size:.875rem; }}
+  input {{ width:100%; padding:.625rem .75rem; font-size:1rem; color:inherit;
+           background:var(--bg); border:1px solid var(--border);
+           border-radius:.5rem; }}
+  input:focus {{ outline:2px solid var(--accent); outline-offset:1px; }}
+  button {{ width:100%; margin-top:.75rem; padding:.625rem; font-size:1rem;
+            font-weight:600; color:#fff; background:var(--accent);
+            border:0; border-radius:.5rem; cursor:pointer; }}
+  .err {{ margin:0 0 .75rem; color:var(--err); font-size:.875rem; }}
+</style>
+</head><body>
+<form method="post" action="/login">
+  <h1>Buffers</h1>
+  <p>Paste the server token to use this browser as a client.</p>
+  {error}
+  <input type="password" name="token" autocomplete="current-password"
+         autofocus placeholder="Token" aria-label="Token">
+  <input type="hidden" name="next" value="{next}">
+  <button type="submit">Sign in</button>
+</form>
+</body></html>
+"""
+
+
+def login_page(error: str = "", status: int = 200):
+    body = LOGIN_PAGE.format(
+        error=f'<p class="err">{html.escape(error)}</p>' if error else "",
+        next=html.escape(safe_next(), quote=True),
+    )
+    return body, status, {"Content-Type": "text/html; charset=utf-8"}
+
+
+def safe_next() -> str:
+    """Where to go after signing in. Same-site absolute paths only -- note that
+    "//evil.com" is a protocol-relative URL, not a path."""
+    nxt = request.values.get("next", "/")
+    return nxt if nxt.startswith("/") and not nxt.startswith("//") else "/"
+
+
 @app.get("/")
 def index():
-    return "Buffers server.\n", 200, {"Content-Type": "text/plain; charset=utf-8"}
+    if not web_built():
+        return "Buffers server.\n", 200, {"Content-Type": "text/plain; charset=utf-8"}
+    if not session.get("auth"):
+        return redirect("/login")
+    # Never cached: the asset names inside it are content-hashed, so this one
+    # file is what makes a deploy visible.
+    return send_web("index.html", "no-cache")
+
+
+@app.get("/login")
+def login_form():
+    if not web_built():
+        abort(404)
+    if session.get("auth"):
+        return redirect(safe_next())
+    return login_page()
+
+
+@app.post("/login")
+def login_submit():
+    if not web_built():
+        abort(404)
+    # The token is 32 random bytes, so this is not a rate limiter -- it just
+    # makes an automated guessing loop pointless to even start.
+    time.sleep(0.4)
+    sent = (request.form.get("token") or "").strip()
+    if not (TOKEN and sent and hmac.compare_digest(sent, TOKEN)):
+        return login_page("That token doesn't match.", 401)
+    session.permanent = True
+    session["auth"] = True
+    return redirect(safe_next())
+
+
+@app.post("/logout")
+def logout():
+    session.clear()
+    return redirect("/login")
+
+
+@app.get("/api/whoami")
+def whoami():
+    """Who the caller is signed in as. The web UI asks once at boot: a 401 here
+    is what sends it to /login, and it is deliberately the ONLY thing that does
+    -- being offline must never bounce a browser away from a live session."""
+    if not authorized():
+        return jsonify(error="unauthorized"), 401
+    return jsonify(user=WEB_USER, cloud=CLOUD_HOST)
+
+
+@app.get("/<path:filename>")
+def web_asset(filename: str):
+    """The web build's static files. Unauthenticated on purpose: this is the
+    application, not the data -- and the login page has to load for someone who
+    has no session yet."""
+    if not web_built():
+        abort(404)
+    if not (filename.startswith(WEB_PREFIXES) or filename in WEB_FILES):
+        abort(404)
+    # Vite content-hashes everything under assets/, so those may be cached hard;
+    # the rest is named by hand and must not be.
+    cache = "public, max-age=31536000, immutable" if filename.startswith("assets/") else "no-cache"
+    return send_web(filename, cache)
+
+
+@app.after_request
+def security_headers(resp):
+    # Only the pages, not the JSON API (which no browser renders).
+    if resp.mimetype == "text/html":
+        resp.headers.setdefault(
+            "Content-Security-Policy",
+            # 'unsafe-inline' for styles is unavoidable: CodeMirror injects its
+            # theme as inline style elements at runtime. Scripts stay strict.
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data:; font-src 'self'; connect-src 'self'; "
+            "frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+        )
+        resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+        resp.headers.setdefault("Referrer-Policy", "same-origin")
+    return resp
 
 
 @app.put("/api/v1/<user>/<host>")

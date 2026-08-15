@@ -89,15 +89,33 @@ const PUSH_IDLE_MS = 5000;
 let pushTimer = 0;
 /** The serialized payload waiting to go, or null when nothing is queued. */
 let pending: string | null = null;
+/** Is the queued payload empty? Tracked at queue time so pushPending doesn't
+    re-parse it. */
+let pendingEmpty = false;
 /** The last payload the server accepted — an identical one is never re-sent
     (tab switches flush an unchanged session; don't spam the server). */
 let lastPushed = "";
 let inFlight = false;
 
+/** Did this session start with buffers restored from local storage? A cold start
+    that restored NOTHING must not automatically push an empty payload: that is
+    the reinstalled-client failure the server's daily history exists to survive,
+    and it is far more likely in a browser (iOS Safari evicts script-writable
+    storage after 7 days idle) than on a desktop. The guard lifts the moment
+    there is anything to push, so "I closed every tab" still publishes normally.
+    An explicit Push now (forcePush) is never blocked — that one is deliberate. */
+let restoredSomething = true;
+export function noteRestoredSession(hadBuffers: boolean): void {
+  restoredSomething = hadBuffers;
+}
+
 /** Called from the editor's sessionFlushed hook: queue a push after 5 s idle. */
 export function schedulePush(session: Session): void {
   if (!pushEnabled()) return;
-  pending = JSON.stringify(toPayload(session));
+  const payload = toPayload(session);
+  if (payload.buffers.length) restoredSomething = true;
+  pending = JSON.stringify(payload);
+  pendingEmpty = payload.buffers.length === 0;
   clearTimeout(pushTimer);
   pushTimer = window.setTimeout(() => void pushPending(), PUSH_IDLE_MS);
 }
@@ -108,6 +126,7 @@ export function schedulePush(session: Session): void {
 export async function forcePush(session: Session): Promise<string> {
   if (!pushEnabled()) return "Remote push is off — configure it in Settings";
   pending = JSON.stringify(toPayload(session));
+  pendingEmpty = false; // deliberate: an explicit push publishes whatever it is
   lastPushed = ""; // defeat the unchanged check
   clearTimeout(pushTimer);
   await pushPending();
@@ -118,6 +137,7 @@ async function pushPending(): Promise<void> {
   if (inFlight) return; // the running push re-checks pending when it lands
   const body = pending;
   if (!body || body === lastPushed || !pushEnabled()) return;
+  if (pendingEmpty && !restoredSomething) return; // see noteRestoredSession
   inFlight = true;
   const s = state.settings;
   try {

@@ -1,6 +1,6 @@
 import { invoke } from "./ipc";
 import { comboLabel } from "./commands";
-import { isMac } from "./platform";
+import { isMac, isTouch } from "./platform";
 import type { Settings } from "./types";
 
 export const FONT_MIN = 9;
@@ -41,10 +41,23 @@ export const state = {
   keybindings: {} as Record<string, string[]>,
 };
 
+/** Whether the minimap should actually render. THE rule, so the editor and the
+ *  Remote preview can't drift: it is a hover-and-drag target that eats width a
+ *  phone hasn't got, and the overlay scrollbar it pairs with is mouse-only — so
+ *  a touch device never gets one, whatever the setting says. (The setting is
+ *  left alone rather than forced off: the same account on a desktop still
+ *  wants it, and Settings hides the switch on touch anyway.) */
+export function minimapOn(): boolean {
+  return state.settings.minimap && !isTouch;
+}
+
 /** The current first binding for a command, formatted for the platform — "⌘T" on
- *  macOS, "Ctrl+T" on Windows/Linux. Empty if the command has no binding. Use it
- *  instead of hand-writing a shortcut into any user-visible string. */
+ *  macOS, "Ctrl+T" on Windows/Linux. Empty if the command has no binding, and
+ *  always empty on a touch device (there is no keyboard to advertise). Use it
+ *  instead of hand-writing a shortcut into any user-visible string — every
+ *  caller then degrades correctly on a phone for free. */
 export function hint(id: string): string {
+  if (isTouch) return "";
   const combo = state.keybindings[id]?.[0];
   return combo ? comboLabel(combo) : "";
 }

@@ -94,7 +94,13 @@ svg {
 #app {
   display: flex;
   flex-direction: column;
+  /* --app-h is the visualViewport height, set by main.ts — the only value that
+     excludes the on-screen keyboard and a mobile browser's collapsing toolbars.
+     100dvh is the fallback where visualViewport is missing; 100vh is last
+     because it over-reports on phones. */
   height: 100vh;
+  height: 100dvh;
+  height: var(--app-h, 100dvh);
 }
 
 /* ---------- custom scrollbars (never native) ---------- */
@@ -1556,4 +1562,191 @@ body.tab-dragging * {
 
 .dropitem.disabled:hover {
   background: none;
+}
+
+/* ==========================================================================
+   Touch and narrow screens (the web build's phone/tablet story)
+
+   Two independent axes, deliberately kept apart:
+
+     :root.touch  — no mouse and no keyboard. Hover affordances go away, tap
+                    targets grow, the editor hands selection back to the OS.
+     #app.narrow  — not enough width, whatever the input device. The chrome
+                    re-flows; main.ts moves the buttons (JS, since CSS can't
+                    re-parent), and these rules style where they land.
+
+   A narrow desktop window gets the layout without the touch rules; a tablet in
+   landscape gets the touch rules without the layout. Neither implies the other.
+   ========================================================================== */
+
+/* ---------- narrow: top strip is tabs only, and it scrolls ---------- */
+#app.narrow .tabbar {
+  padding: 0.375rem 0.5rem 0;
+  min-height: 2.125rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-wrap: nowrap;
+  /* The strip is the scroller; hide its bar (the tabs themselves are the
+     affordance) and stop the rubber-banding from dragging the page. */
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+
+#app.narrow .tabbar::-webkit-scrollbar {
+  display: none;
+}
+
+#app.narrow .tabs,
+#app.narrow .systabs {
+  flex: 0 0 auto;
+}
+
+/* Full-bleed editor: the rounded card and its margins are desktop luxuries. */
+#app.narrow .content {
+  padding: 0.375rem 0.375rem 0;
+}
+
+#app.narrow .editorview {
+  border-radius: 0.375rem;
+}
+
+/* The status bar's counters are the first thing to go when width is scarce;
+   the language button and the file link still earn their place. */
+#app.narrow .statusinfo {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ---------- narrow: the bottom action bar ---------- */
+.mobilebar {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  padding-bottom: calc(0.25rem + env(safe-area-inset-bottom, 0px));
+  background: var(--header);
+  border-top: 1px solid var(--border);
+}
+
+.mobilebar[hidden] {
+  display: none;
+}
+
+/* The toolbar is a plain row down here, not the set-apart group it is up top. */
+.mobilebar .actions {
+  display: flex;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.mobilebar .tbtn {
+  padding: 0.5rem;
+}
+
+/* ---------- touch: hit targets and hover affordances ---------- */
+:root.touch .tbtn {
+  padding: 0.4375rem;
+}
+
+/* Nothing hovers, so the close × has to be permanently visible — otherwise a
+   tab can only be closed from the toolbar. */
+:root.touch .tabclose {
+  opacity: 1;
+}
+
+:root.touch .tab {
+  padding-top: 0.4375rem;
+  padding-bottom: 0.4375rem;
+}
+
+/* The sidebar's drag handle needs a mouse; narrow never shows the sidebar. */
+:root.touch .sidebar-resize {
+  display: none;
+}
+
+/* iOS zooms the page when a focused input's text is under 16px. Matching the
+   font size is the fix that doesn't disable pinch-zoom for everything else. */
+:root.touch .textinput {
+  font-size: 1rem;
+}
+
+/* ---------- touch: give selection back to the platform ----------
+   The custom Sublime-style selection layer exists because WKWebView ignores the
+   ::selection styling CodeMirror injects (see editor-core.ts). It draws
+   rectangles that look right and are inert — fine with a mouse, wrong under a
+   finger, where iOS wants to attach its own selection handles to the layer it
+   knows. So on touch the custom layer steps aside and CodeMirror's own
+   drawSelection layer (hidden by default, a few hundred lines up) comes back. */
+:root.touch .edhost .cm-editor .cm-selectionLayer {
+  display: block;
+}
+
+:root.touch .edhost .cm-editor .cm-bufSelectionLayer {
+  display: none;
+}
+
+/* The overlay scrollbar reveals itself on hover over the minimap strip, and the
+   minimap itself is off on touch (editor.ts) — so the strip is dead weight. */
+:root.touch .cm-buf-scrollbar {
+  display: none;
+}
+
+/* ---------- narrow: the Remote tab stacks ----------
+   Three panes side by side (Hosts | Buffers | Content) need ~26rem before the
+   preview gets a single pixel, so in portrait on a phone the content pane is
+   simply off-screen. Stack instead: the two lists share a band across the top,
+   the content takes the rest.
+
+   Grid rather than flex-wrap because the split between the bands has to be
+   stated (2fr / 3fr) — wrapping would let the lists' content decide, and a host
+   with twenty buffers would squeeze the text out of view again. */
+#app.narrow .remote-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: minmax(0, 2fr) minmax(0, 3fr);
+}
+
+#app.narrow .remote-hosts,
+#app.narrow .remote-buffers {
+  /* Override the fixed 13rem column width — here the grid decides. */
+  width: auto;
+  min-width: 0;
+  min-height: 0;
+  grid-row: 1;
+  border-bottom: 1px solid var(--border);
+}
+
+#app.narrow .remote-hosts {
+  grid-column: 1;
+}
+
+#app.narrow .remote-buffers {
+  grid-column: 2;
+  border-right: none; /* nothing to its right now */
+}
+
+#app.narrow .remote-preview {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  min-height: 0;
+}
+
+/* ---------- touch: the Remote preview selects natively ----------
+   On touch the preview drops drawSelection and sublimeSelection along with
+   `editable` (see previewState in remotePage.ts), so the only selection paint
+   left is the browser's own — which editor-core.css blanks inside .edhost, for
+   the good reason that it otherwise covers the custom layer. Put it back for
+   this one pane, at the same colour the custom layer used. */
+:root.touch .remote-edhost .cm-editor .cm-line::selection,
+:root.touch .remote-edhost .cm-editor .cm-line ::selection,
+:root.touch .remote-edhost .cm-editor .cm-content::selection {
+  background-color: var(--ed-sel) !important;
+}
+
+/* No cursor and nothing to type into: CM still reserves the caret colour. */
+:root.touch .remote-edhost .cm-editor .cm-content {
+  caret-color: transparent;
 }

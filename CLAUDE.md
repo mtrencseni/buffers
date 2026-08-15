@@ -26,12 +26,15 @@ single design (not native emulation), inline-SVG icons, bundled Inter font (UI)
 pnpm install
 pnpm tauri dev            # native app + HMR
 pnpm dev                  # browser-only against src/mock.ts (localStorage-backed)
+pnpm dev:web              # the WEB build against a real server (proxies /api to :8060)
 pnpm tauri build          # → src-tauri/target/release/bundle/macos/Buffers.app
+pnpm build:web            # → dist-web/ ; server/build-web.sh installs it into server/web/
 ./node_modules/.bin/tsc   # typecheck
 cd src-tauri && cargo check
 ```
 
-Dev server runs on **:1430** (Delight uses :1420, so both can run at once).
+Dev server runs on **:1430** (Delight uses :1420, so both can run at once);
+`dev:web` uses **:1431**, so the mock and the web build can run side by side.
 
 ## Cutting a release
 
@@ -105,9 +108,18 @@ dependency here, Delight's build breaks. See Delight's CLAUDE.md for the Vite
 ## Architecture
 
 Frontend is the whole app; the Rust backend is tiny (persistence + file IO +
-devtools). They talk over Tauri IPC (`invoke`). Outside Tauri, `src/ipc.ts`
-routes `invoke` to `src/mock.ts` (localStorage), so the full UI — including hot
-exit — runs and is testable in a browser. `isTauri` gates native-only calls.
+devtools). They talk over Tauri IPC (`invoke`). **Three backends answer that one
+surface**, picked in `src/ipc.ts` from `src/target.ts`:
+
+| Target | When | Backend |
+| --- | --- | --- |
+| `isTauri` | the desktop app | Rust over IPC |
+| `isWeb` | `vite build --mode web`, served by the Buffers server | `web.ts` — same-origin `fetch()` + IndexedDB |
+| `isMock` | plain `pnpm dev` | `mock.ts` — canned data + localStorage |
+
+So the full UI — including hot exit — runs and is testable in a browser, and the
+same source is also the shipped web client. `isTauri` gates native-only calls;
+`isBrowser` gates the things a page can't do at all (real file paths).
 
 ### Frontend (`src/`)
 
@@ -115,19 +127,22 @@ exit — runs and is testable in a browser. `isTauri` gates native-only calls.
 | --- | --- |
 | `editor.ts` | **The heart.** `Editor` class: one CM6 `EditorView`, a `Map` of buffers (each owns an immutable `EditorState`). Tab switch swaps state into the view. Contains: hot-exit persistence state machine (including undo-history serialization), the custom Sublime selection layer, selection-only whitespace decorations, syntax `HighlightStyle`, compartments for language / wrap / minimap / **indent**, the closed-buffer (reopen) stack, the memoized word count, and **`EDITOR_COMMANDS`** — the CM editing commands the registry owns (see below). |
 | `findall.ts` | The ⌘⇧F overlay: searches every open buffer's text (case-insensitive substring, capped at 50 hits per buffer / 300 total, and it *says* when it truncated), groups hits by buffer with line numbers, and hands back document offsets for `Editor.reveal()`. Same interaction contract as `langpicker.ts`: one focusable element owns the keyboard and `stopPropagation()`s so ⌘W can't reach the global handler. Gated on `settings.searchAllBuffers`, default **off**. |
-| `main.ts` | App shell: tab strip (buffer + system tabs) in either the **top bar** or a **resizable left sidebar** (`applyTabsLayout`), the **action toolbar** (`actionsEl`), integrated titlebar, axis-aware tab drag-reorder, command handlers, native-menu event routing, import/export (dialog plugin), status bar (Ln/Col/chars + language picker), zoom (editor font size), theme toggle, restore/persist. |
+| `main.ts` | App shell: tab strip (buffer + system tabs) in the **top bar**, a **resizable left sidebar**, or (under `NARROW_PX` = 820) a scrolling top strip plus a **bottom action bar** (`applyTabsLayout`), the **action toolbar** (`actionsEl`), integrated titlebar, axis-aware tab drag-reorder, command handlers, native-menu event routing, import/export (native dialog under Tauri; `<input type=file>` + download blob in a browser), status bar (Ln/Col/chars + language picker), zoom (editor font size), theme toggle, `trackViewport()` (visualViewport → `--app-h`), restore/persist. |
 | `langs.ts` | Language registry: id → label, CM syntax extension, file extensions (import auto-detect + export suffix). Official CM `lang-*` packages + `legacy-modes` for the rest. |
-| `state.ts` | Global `state` (settings, zoomSize, keybindings), defaults, debounced `persist()` → `save_state` (settings.json; buffers persist separately). |
+| `state.ts` | Global `state` (settings, zoomSize, keybindings), defaults, debounced `persist()` → `save_state` (settings.json; buffers persist separately), `hint()` (empty on touch) and **`minimapOn()`** — THE minimap rule, shared by the editor and the Remote preview so they can't drift. |
 | `types.ts` | `Settings`, `BufferSnapshot`, `Session`, `LangId`, `Theme`. |
 | `commands.ts` | Keyboard **command registry** + combo helpers (copied from Delight, Buffers' command set). Add a shortcut here. |
 | `keyboard.ts` | Global keydown → combo → command dispatch; text-field guard + native-edit passthrough (⌘C/X/V/A/Z). |
-| `keybindingsPage.ts`, `settingsPage.ts` | The Shortcuts / Settings tab UIs. Settings includes the Remote section (URL / user / host / token / publish toggle / test button). |
+| `keybindingsPage.ts`, `settingsPage.ts` | The Shortcuts / Settings tab UIs. Settings includes the Remote section (URL / user / host / token / publish toggle / test button) and takes a **`caps`** object (`fixedRemote`, `keyboard`, `devTools`, `signOut`) so it renders what the build can actually offer: the web build drops URL/user/token (the origin is the server, the cookie is the credential) and gains Sign out; touch drops the Keyboard section and the minimap switch; a browser drops Advanced. |
 | `remote.ts` | Remote client logic: `toPayload` (open buffers stripped to `name`/`language`/`text` — nothing else ever leaves the machine), debounced push (5 s after each hot-exit flush, immediate on blur/hidden/pagehide, unchanged payloads skipped), `fetchRemote`, `remoteStatus` (failures are silent — surfaced only in the Remote tab and Settings), plus the **Cloud** half: `cloudPush` (one buffer, add-or-overwrite by name, resolves `replaced`) / `cloudDelete` / `cloudConfigured`, `loadRemoteCache`/`saveRemoteCache`, and `normalizeRemoteUrl` (assumes `https://` when no scheme is typed). HTTP lives in Rust: the CSP (`default-src 'self'`) blocks webview fetch() to the server. |
-| `remotePage.ts` | The Remote system tab: host list → buffer list → CM preview. The preview is **read-only but interactive** — live cursor, keyboard/mouse selection, ⌘C copy, find — via the readOnly facet WITHOUT `editable(false)` (that would kill the cursor), plus the editor's own selection pieces (mandatory: editor-core.css hides the native selection inside `.edhost`). Remote buffers are never written back; the actions are copy text and open-as-local. The exceptions are deletes, all behind the same two-click arm/confirm idiom (auto-disarms after 4 s): **Cloud** buffer rows (`kind === "cloud"`) carry a per-buffer `×`, the toolbar shows a trash button for a Cloud selection, and **machine host** rows (`kind !== "cloud"` — key off `kind`, never the name) carry a whole-host `×` ("Delete all N from host?") for retired hardware; the Cloud row itself has no host-level delete. While the Remote tab is showing, main.ts's `syncActions()` hides the buffer-only toolbar actions (import/export/push/close/replace); Find stays and routes into the preview's search panel. Right-click in the preview replaces the native context menu (whose Cut/Paste can't apply to read-only text; the webview can't drop native items but honors preventDefault) with a custom Copy / Select-all menu. |
+| `remotePage.ts` | The Remote system tab: host list → buffer list → CM preview. The preview is **read-only but interactive** — live cursor, keyboard/mouse selection, ⌘C copy, find — via the readOnly facet WITHOUT `editable(false)` (that would kill the cursor), plus the editor's own selection pieces (mandatory: editor-core.css hides the native selection inside `.edhost`). **On touch that inverts**: `editable` is what makes the content contentEditable, and tapping contentEditable raises the on-screen keyboard over text you cannot type into — so touch gets `editable(false)`, drops `drawSelection`/`sublimeSelection` with it, and selects with the platform's own handles (styles.css restores the native `::selection` colour for `.remote-edhost`). The custom context menu is also skipped on touch: a long press *is* the OS's select-and-copy gesture and fires `contextmenu` on the way, so ours appeared alongside the platform's selection bar — two menus for one press. Remote buffers are never written back; the actions are copy text and open-as-local. The exceptions are deletes, all behind the same two-click arm/confirm idiom (auto-disarms after 4 s): **Cloud** buffer rows (`kind === "cloud"`) carry a per-buffer `×`, the toolbar shows a trash button for a Cloud selection, and **machine host** rows (`kind !== "cloud"` — key off `kind`, never the name) carry a whole-host `×` ("Delete all N from host?") for retired hardware; the Cloud row itself has no host-level delete. While the Remote tab is showing, main.ts's `syncActions()` hides the buffer-only toolbar actions (import/export/push/close/replace); Find stays and routes into the preview's search panel. Right-click in the preview replaces the native context menu (whose Cut/Paste can't apply to read-only text; the webview can't drop native items but honors preventDefault) with a custom Copy / Select-all menu. |
 | `langpicker.ts` | The language droplist, shared by the status bar and Settings so they can't drift: labels sorted A→Z and full keyboard control — ↑/↓, Home/End, PageUp/Down, Enter, Esc, and type-ahead (repeating a letter cycles its entries; two quick letters narrow). The caller owns opening/closing and outside-click dismissal. |
 | `title.ts` | `bufferTitle()` — THE display-name rule (pinned name, else first non-empty line), shared by editor.ts and remote.ts so the pushed `name` matches the tab title. Not in editor-core.ts (that must stay dependency-closed for Delight). |
-| `platform.ts` | `isMac` + `MOD` (the primary modifier: `Meta` on macOS, `Ctrl` elsewhere). **The only place the frontend branches on OS** — commands, keyboard, state and main all read it. |
-| `icons.ts`, `theme.ts`, `toast.ts`, `ipc.ts`, `mock.ts` | Inline SVG icons; theme apply/observe; toasts; IPC wrapper + `isTauri`; browser mock. |
+| `platform.ts` | `isMac` + `MOD` (the primary modifier: `Meta` on macOS, `Ctrl` elsewhere) + `isTouch`. **The only place the frontend branches on OS or input device** — commands, keyboard, state, editor and main all read it. In the web build `isMac` reads the *browser's* host, so Mac Chrome gets ⌘ bindings and Windows Chrome gets Ctrl, for free. |
+| `target.ts` | `isTauri` / `isWeb` / `isMock` / `isBrowser` — **the only place the frontend branches on which shell it's in.** Build-time (`import.meta.env.MODE`), never sniffed. |
+| `web.ts` | The web build's backend: the same command surface Rust implements, over same-origin `fetch()`. Session in IndexedDB, settings in localStorage, auth by cookie (this code never sees the token). Mints this browser's client name (`web-<plat>-<4 hex>`). Maps a 404 on either delete to success, exactly like `remote.rs`, so both clients behave identically. |
+| `idb.ts` | The IndexedDB key/value store behind `web.ts`, plus `requestPersistence()`. Falls back to localStorage when IDB won't open. |
+| `icons.ts`, `theme.ts`, `toast.ts`, `ipc.ts`, `mock.ts` | Inline SVG icons; theme apply/observe; toasts; IPC router (3 backends); browser mock. |
 | `styles.css` | All styling. Theme tokens (light = One-Light-ish; dark = Sublime **Mariana**). CM overrides are prefixed `.edhost .cm-editor` to beat CM's adopted-stylesheet specificity. |
 
 ### Backend (`src-tauri/src/`)
@@ -149,6 +164,19 @@ exit — runs and is testable in a browser. `isTauri` gates native-only calls.
 - **Remote (server) client** — one-way by design: this machine PUSHes its open buffers under its own hostname; other machines' buffers are READ-only (copy locally by hand; no syncing, ever). Push piggybacks on the hot-exit flush via the optional `sessionFlushed` hook on `EditorHost` (`remote.ts` adds its own 5 s debounce and skips unchanged payloads, so tab switches don't push). `initRemote()` must run AFTER the Editor is constructed — its immediate-push listeners rely on the editor's flush listeners (same events) having registered first. `remoteHost` is seeded from `machine_hostname()` when empty; the token sits in settings.json in plaintext deliberately (shared-secret, not a hardened credential — no keychain). Commands: `openRemote` (⌘⇧R), `pushNow` (unbound), `pushCloud` (⌘⇧C). GOTCHA: new settings must be added to `restoreSettings()`'s allowlist in main.ts or they silently don't persist.
 - **Remote is a live view with an offline cache.** The fetched data lives in the Remote page's closure — every open re-fetches, and closing the tab drops it. On top of that, each successful fetch is written to `.remote-cache.json`, and opening the tab paints that snapshot *before* the network call, so with no connection you still get the last known hosts, buffers and text (Copy and "Open as buffer" work off it). The toolbar then reads e.g. `cannot reach the server · cached, 5 min ago`; the marker is also set when a live fetch fails, because a host row's own "5 min ago" is the server's last-received time and can look fresher than the data really is. **This is the one place other machines' text lands on disk here** — a deliberate exception to "remote buffers stay remote", justified because it's a cache: any successful fetch replaces it wholesale, and nothing is ever merged into a local buffer.
 - **Cloud vs a machine mirror** — the server serves both from one list, told apart by the `kind` field (**never** by matching the host name "Cloud"). A *machine* mirrors itself: it PUTs all its open buffers wholesale every few seconds, so closing a buffer removes it. *Cloud* is curated: `pushCloud` POSTs exactly ONE buffer under its current display title, same name overwrites, nothing expires, and entries leave only via the `×` in the Remote tab. Cloud buffers are never edited in place and never sync back down — to keep working on one you "Open as buffer", which makes an ordinary local copy. Pushing after renaming a buffer therefore creates a SECOND Cloud entry; that's intended, not a bug.
+- **The web build is a client, not a viewer.** `server/web/` holds a build of this
+  same frontend, served by the Buffers server itself. Every browser that opens it
+  is its own client — its own IndexedDB session, its own generated host name
+  (`web-mac-3f9a`), pushing wholesale under that name exactly like a Mac does.
+  Two browsers on one laptop are two clients; that is the intent. Serving the
+  bundle from the API's own origin is the *mechanism*, not a convenience: it is
+  what lets the page `fetch()` the API with no CORS and no configured URL (the
+  desktop's CSP problem, which forced HTTP into Rust, simply doesn't arise). The
+  web build therefore **pins** `remoteUrl` to `location.origin` and takes
+  `remoteUser` from `/api/whoami` — those aren't settings there. Auth is an
+  HttpOnly cookie from `/login`, so no JS ever holds the token. **The Cloud is
+  unchanged**: a web client pushes and deletes single Cloud buffers exactly like
+  a desktop one, and never uses it as its own store.
 - **Custom selection layer** (`sublimeSelection`, `editor.ts`): draws Sublime-style hug + newline-nub selection with `RectangleMarker`s in a `layer()` below the text. Rows are grouped into visual-row bands and tiled **self-calibratingly**: the shared edge between adjacent rows is the rounded midpoint of their glyph-box centers, so boxes can't gap or overlap and no line-height metric is trusted for geometry (see gotchas — every metric-based variant broke). Plus `PAD` px horizontal breathing room.
 - **Selection whitespace** (`selectionWhitespace` ViewPlugin): renders `·` for spaces and `→` for tabs, **only inside the selection** (Sublime `draw_white_space: selection`), clipped to the viewport.
 - **Keybindings:** every shortcut is a `Command` in `commands.ts`; `main.ts` builds a combo→id map and dispatches. To add one: extend `CommandId` + `COMMANDS`, add a handler in `main.ts`'s `commandHandlers` (and a `menu.rs` item if it belongs in the menu).
@@ -193,6 +221,23 @@ exit — runs and is testable in a browser. `isTauri` gates native-only calls.
   had been missing since it was added and was found (and fixed) in 2026-08-09's
   pass. When you add a field to `Settings`, add the matching `if (typeof …)`
   line in the same commit, and clamp it there if it has a range.
+- **A cold start that restored nothing must not push.** A client with no session
+  (fresh install, cleared storage) would otherwise publish an empty payload over
+  its own good server-side state seconds after launch. `noteRestoredSession()`
+  in remote.ts blocks exactly that case — automatic pushes only, and only until
+  there is something to push, so "I closed every tab" still publishes. The
+  server's daily history is the second net, not the first. This matters far more
+  in a browser than on a desktop: **iOS Safari evicts script-writable storage
+  after 7 days without interaction**, which is a cleared session that looks like
+  a normal launch. `requestPersistence()` asks for an exemption and Add to Home
+  Screen actually gets one.
+- **The narrow layout re-parents in JS, not CSS.** Under `NARROW_PX` the + button
+  and action toolbar move into `.mobilebar`; CSS cannot re-parent, so
+  `applyTabsLayout` does it and the resize listener calls it **only when the
+  breakpoint is actually crossed** (a rotation or an on-screen keyboard fires
+  `resize` constantly). All three branches must `replaceChildren`, never
+  `append` — the top branch used to `append` on the assumption the bar was
+  empty, which stopped being true the moment a third layout existed.
 - **WKWebView ignores `::selection` from adopted stylesheets.** CM injects its
   "hide native selection" rule that way, so WKWebView paints the OS selection
   *over* the text. Fixed by hiding the native selection from a **real** stylesheet
@@ -260,14 +305,16 @@ exit — runs and is testable in a browser. `isTauri` gates native-only calls.
 
 ## Platform partitioning — the rule
 
-**Every OS difference lives in exactly one of these five seams. Never anywhere else.**
+**Every OS, shell and input-device difference lives in exactly one of these seams.
+Never anywhere else.**
 No `if (mac) … else …` sprinkled through feature code, and no platform's settings
 sitting in a shared file where the other platform has to override them back.
 
 | Seam | Holds | Example |
 | --- | --- | --- |
-| `src/platform.ts` | The **only** OS branch in the frontend: `isMac`, `MOD`. | Shortcut defaults, label style, default font. |
-| `.mac` class on `:root` | CSS that only applies to macOS chrome. `main.ts` adds it when `isMac`. | `:root.native.mac .tabbar` traffic-light inset. |
+| `src/platform.ts` | The **only** OS/input branch in the frontend: `isMac`, `MOD`, `isTouch`. | Shortcut defaults, label style, default font, hiding the shortcut UI on a phone. |
+| `src/target.ts` | The **only** shell branch: `isTauri` / `isWeb` / `isMock` / `isBrowser`. | Which backend `ipc.ts` calls; browser vs native import/export. |
+| `.mac` / `.native` / `.web` / `.touch` on `:root` | CSS that only applies to one chrome or one input device. `main.ts` adds them. | `:root.native.mac .tabbar` traffic-light inset; `:root.touch` tap targets and native selection. |
 | `#[cfg(target_os = …)]` | Rust that only compiles on one OS. | `menu.rs` (macOS-only menu), `devtools.rs` (two inspectors), `nudge_relayout`. |
 | `tauri.<os>.conf.json` | Per-OS Tauri config, merged over `tauri.conf.json`. | `macos` → `targets:["app"]` + signing identity; `windows` → `targets:["nsis"]`. |
 | `scripts/prebuild.mjs` | Platform-specific *build* steps, branched on `os.platform()`. | macOS keychain unlock. |
@@ -286,6 +333,14 @@ saved on the Mac is stored as `Meta+KeyT` in that machine's `settings.json`; the
 canonical string still *parses* on Windows, it just wouldn't fire (the Win key).
 Fresh installs get the right defaults, so this only bites if you copy a settings.json
 between machines.
+
+The same rule carries into the web build, where "machine" means **the browser's
+host**: the web UI in Mac Chrome gets ⌘ defaults and ⌘-shaped labels, in Windows
+Chrome it gets Ctrl — `platform.ts` reads `navigator`, so this needs no web-specific
+code. On a phone or tablet there are no shortcuts to show at all: `isTouch` empties
+`hint()`, hides the Shortcuts tab and the ⌘K map, and drops the keyboard-map
+button. The global keydown handler stays installed regardless, so an iPad with a
+paired keyboard still works — what goes away is UI promising keys that aren't there.
 
 ## Cross-platform status (Mac ✅ / Win ✅ / Linux)
 

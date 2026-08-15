@@ -16,7 +16,9 @@ import { Editor, type EditorCommandId } from "./editor";
 import { buildFindAll } from "./findall";
 import { initKeyboard } from "./keyboard";
 import { COMMANDS, mergeKeybindings, type CommandId } from "./commands";
-import { isMac } from "./platform";
+import { isMac, isTouch } from "./platform";
+import { isBrowser, isWeb } from "./target";
+import { requestPersistence } from "./idb";
 import { applyTheme, effectiveTheme, onThemeChange } from "./theme";
 import { toast } from "./toast";
 import { toggleKeyboardMap } from "./keyboardmap";
@@ -34,6 +36,7 @@ import {
   loadRemoteCache,
   HOST_RE,
   initRemote,
+  noteRestoredSession,
   normalizeRemoteUrl,
   remoteConfigured,
   remoteStatus,
@@ -59,6 +62,13 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string): HTMLEl
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+/** Below this width the chrome re-flows for a phone: tabs scroll across the top,
+    the action toolbar drops to a bottom bar within thumb reach, and the left
+    sidebar isn't offered at all. Width, not touch — a narrow desktop window gets
+    the same treatment, and a tablet in landscape doesn't need it. */
+const NARROW_PX = 820;
+const isNarrow = () => window.innerWidth < NARROW_PX;
 
 /** " (⌘T)" / " (Ctrl+T)" — the command's current binding, parenthesized for a
  *  tooltip. Platform-correct and rebind-aware; never spell a shortcut by hand. */
@@ -89,6 +99,10 @@ class App {
   tabbar = el("div", "tabbar");
   sidebar = el("div", "sidebar");
   sidebarResize = el("div", "sidebar-resize");
+  // Narrow screens only: a bottom bar carrying + and the action toolbar, within
+  // thumb reach. It takes the SAME elements the top bar would (see
+  // applyTabsLayout), so there is one set of buttons and one set of handlers.
+  mobilebar = el("div", "mobilebar");
 
   editorWrap = el("div", "tabview editorview");
   editorHost = el("div", "edhost");
@@ -115,17 +129,48 @@ class App {
   private delArmTimer = 0;
   /** The find-in-all-buffers overlay while it's open (see findall.ts). */
   private findAllEl: HTMLElement | null = null;
+  /** Last known side of the NARROW_PX breakpoint, so resize only re-lays-out
+      the chrome when the window actually crosses it. */
+  private wasNarrow = isNarrow();
 
   async init(): Promise<void> {
+    // The web build is served by the very server it talks to, so ask that server
+    // who we are before anything renders. An unauthenticated boot goes to the
+    // login page — nothing is built yet, so nothing is lost. Being merely
+    // OFFLINE must not redirect: the session is sitting in IndexedDB and the app
+    // works fine without a network.
+    let webUser = "";
+    if (isWeb) {
+      const { whoami } = await import("./web");
+      const who = await whoami();
+      if (who.status === "unauth") {
+        location.replace(`/login?next=${encodeURIComponent(location.pathname)}`);
+        return;
+      }
+      if (who.status === "ok") webUser = who.user;
+      requestPersistence();
+    }
+
     const [saved, session] = await Promise.all([
       invoke<any>("load_state").catch(() => null),
       invoke<any>("load_buffers").catch(() => null),
     ]);
     this.restoreSettings(saved);
+    // A cold start that restored nothing must not publish an empty session over
+    // this client's good server-side state (see noteRestoredSession).
+    noteRestoredSession(!!session?.buffers?.length);
+    if (isWeb) {
+      // Pinned, not settable: the server is whoever served this page. A stale
+      // saved URL — or a settings blob carried over from a desktop — must never
+      // point this tab somewhere else.
+      state.settings.remoteUrl = location.origin;
+      if (webUser) state.settings.remoteUser = webUser;
+    }
     state.keybindings = mergeKeybindings(saved?.keybindings);
 
     // First run (or a cleared setting): name this machine after its hostname,
-    // pre-sanitized by the backend to the server's host charset.
+    // pre-sanitized by the backend to the server's host charset. In the browser
+    // there is no hostname to take, so web.ts mints a stable per-browser name.
     if (!state.settings.remoteHost) {
       try {
         const h = await invoke<string>("machine_hostname");
@@ -216,7 +261,10 @@ class App {
       indentMore: () => this.runEditor("indentMore"),
       indentLess: () => this.runEditor("indentLess"),
       toggleWrap: () => this.toggleWrap(),
-      keyboardMap: () => toggleKeyboardMap(),
+      keyboardMap: () => {
+        if (isTouch) return; // nothing to map
+        toggleKeyboardMap();
+      },
       zoomIn: () => this.zoomStep(1),
       zoomOut: () => this.zoomStep(-1),
       zoomReset: () => this.setZoom(state.settings.fontSize, true),
@@ -324,6 +372,9 @@ class App {
     // .native = running in Tauri (not the browser mock); .mac gates the macOS-only
     // integrated-titlebar insets (traffic lights). Windows/Linux keep normal chrome.
     if (isTauri) document.documentElement.classList.add("native");
+    // .web = served by the Buffers server; .touch = no mouse, no keyboard.
+    if (isWeb) document.documentElement.classList.add("web");
+    if (isTouch) document.documentElement.classList.add("touch");
     if (isMac) document.documentElement.classList.add("mac");
 
     this.newBtn.innerHTML = icons.plus;
@@ -373,6 +424,10 @@ class App {
 
     this.kbBtn.innerHTML = icons.keyboard;
     this.kbBtn.title = "Keyboard map" + hint("keyboardMap");
+    // No keyboard, no keyboard map. (The key handler stays installed, so a
+    // paired hardware keyboard still works — there is just no UI promising
+    // keys the device doesn't have.)
+    this.kbBtn.hidden = isTouch;
     this.kbBtn.addEventListener("click", () => toggleKeyboardMap());
     onThemeChange(() => this.syncThemeBtn());
 
@@ -420,20 +475,72 @@ class App {
     this.editorWrap.classList.add("active");
     this.contentEl.append(this.editorWrap);
 
-    root.append(this.tabbar, this.sidebar, this.contentEl);
+    root.append(this.tabbar, this.sidebar, this.contentEl, this.mobilebar);
     this.applyTabsLayout();
     this.syncThemeBtn();
     this.syncDevBtn();
+    this.trackViewport();
     new ResizeObserver(() => this.fitTabTitles()).observe(this.tabbar);
-    window.addEventListener("resize", () => this.fitTabTitles());
+    window.addEventListener("resize", () => {
+      // Crossing the narrow breakpoint re-parents the chrome (JS, not CSS: the
+      // pieces move between containers), so only re-lay-out when it actually
+      // changes — a rotation or an on-screen keyboard fires resize constantly.
+      const narrow = isNarrow();
+      if (narrow !== this.wasNarrow) {
+        this.wasNarrow = narrow;
+        this.applyTabsLayout();
+      }
+      this.fitTabTitles();
+    });
   }
 
-  /** Place the shared tab pieces into the top bar or the left sidebar, per the
-      tabsSide setting. Called at startup and whenever the setting changes. */
+  /** Height of what the user can actually see. On a phone `100vh` includes the
+      area behind the on-screen keyboard and the browser's collapsing toolbars,
+      so the cursor ends up under the keyboard; visualViewport is the only thing
+      that knows better. Falls back to 100dvh in CSS when unsupported. */
+  private trackViewport(): void {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const apply = () =>
+      document.documentElement.style.setProperty("--app-h", `${Math.round(vv.height)}px`);
+    vv.addEventListener("resize", apply);
+    vv.addEventListener("scroll", apply);
+    apply();
+  }
+
+  /** Place the shared tab pieces into the top bar, the left sidebar, or (narrow
+      screens) a top strip plus a bottom bar. Called at startup, when the
+      tabsSide setting changes, and when the window crosses NARROW_PX.
+
+      Every layout re-parents the SAME elements, so there is exactly one + button
+      and one action toolbar in the app, with one set of handlers. */
   applyTabsLayout(): void {
-    const left = state.settings.tabsSide === "left";
-    document.getElementById("app")!.classList.toggle("tabs-left", left);
-    if (left) {
+    const narrow = isNarrow();
+    // A left sidebar would eat half a phone screen. Narrow forces top tabs
+    // without touching the setting, so widening the window restores it.
+    const left = state.settings.tabsSide === "left" && !narrow;
+    const app = document.getElementById("app")!;
+    app.classList.toggle("tabs-left", left);
+    app.classList.toggle("narrow", narrow);
+    this.mobilebar.hidden = !narrow;
+    if (narrow) {
+      // Top: the tabs alone, scrolling sideways. Bottom: everything you tap.
+      this.tabbar.removeAttribute("data-tauri-drag-region");
+      this.tabbar.replaceChildren(this.tabsEl, this.sysTabsEl);
+      this.editorTopbar.remove();
+      this.sidebar.replaceChildren();
+      this.sidebar.style.width = "";
+      const spacer = el("div", "flexspace");
+      this.mobilebar.replaceChildren(
+        this.newBtn,
+        this.actionsEl,
+        spacer,
+        this.cloudBtn,
+        this.themeBtn,
+        this.gearBtn
+      );
+    } else if (left) {
+      this.mobilebar.replaceChildren();
       // Sidebar head: empty on purpose — it's the window-drag strip, and on macOS
       // the inset that keeps the traffic lights clear of the buffer list. The
       // action toolbar lives above the editor (below); + sits under the list.
@@ -468,10 +575,13 @@ class App {
     } else {
       // Top bar: tabs, +, then the actions — set off from + by a wider gap so they
       // read as a toolbar rather than more tab chrome. The spacer keeps them left.
+      this.mobilebar.replaceChildren();
       const spacer = el("div", "flexspace");
       spacer.setAttribute("data-tauri-drag-region", "");
       this.tabbar.setAttribute("data-tauri-drag-region", "");
-      this.tabbar.append(
+      // replaceChildren, not append: the narrow layout leaves its own children
+      // here, and coming back from it must not stack a second set.
+      this.tabbar.replaceChildren(
         this.tabsEl,
         this.newBtn,
         this.actionsEl,
@@ -699,6 +809,9 @@ class App {
   }
 
   openSys(kind: SysTab): void {
+    // Rebinding keys on a device with no keys is not a tab worth having; the
+    // Settings row that opens it is hidden there too.
+    if (kind === "keybindings" && isTouch) return;
     if (kind === "settings" && !this.settingsView) this.settingsView = this.buildSettings();
     if (kind === "keybindings" && !this.kbView) this.kbView = this.buildKeybindings();
     if (kind === "remote" && !this.remoteView) this.remoteView = this.buildRemote();
@@ -830,6 +943,21 @@ class App {
         }
       },
       remoteStatus: () => remoteStatus,
+      caps: {
+        fixedRemote: isWeb,
+        keyboard: !isTouch,
+        devTools: isTauri,
+        signOut: isWeb
+          ? () => {
+              // Flush first: the redirect tears the page down, and the session
+              // write is asynchronous.
+              this.editor.flush();
+              void fetch("/logout", { method: "POST" }).finally(() =>
+                location.replace("/login")
+              );
+            }
+          : undefined,
+      },
     });
     wrap.append(page.el);
     this.contentEl.append(wrap);
@@ -1134,8 +1262,15 @@ class App {
   // ---- import / export -------------------------------------------------------------
 
   private async importFile(): Promise<void> {
-    if (!isTauri) {
-      toast("Import needs the native app");
+    // In a browser there is no path to hand the backend — the file arrives as
+    // content, so it lands in an UNLINKED buffer. Saving it later downloads a
+    // copy rather than writing back; browsers don't grant a page a path.
+    if (isBrowser) {
+      const input = el("input");
+      input.type = "file";
+      input.multiple = true;
+      input.addEventListener("change", () => void this.openFiles([...(input.files ?? [])]));
+      input.click();
       return;
     }
     const { open } = await import("@tauri-apps/plugin-dialog");
@@ -1182,9 +1317,43 @@ class App {
     toast(opened === 1 ? "Imported" : `Imported ${opened} files`);
   }
 
-  /** Native OS file drop onto the window → import the dropped files (Tauri only). */
+  /** Import files dropped or picked in a browser: same result as ⌘O, but read
+      through the File API, so the buffers are unlinked (there is no path). */
+  private async openFiles(files: File[]): Promise<void> {
+    let opened = 0;
+    for (const file of files) {
+      try {
+        const text = await file.text();
+        this.editor.newBuffer(text, langForFilename(file.name), {
+          bufferName: file.name,
+          namePinned: true,
+        });
+        opened++;
+      } catch (e) {
+        toast(String(e));
+      }
+    }
+    if (!opened) return;
+    this.showBuffers();
+    this.renderTabstrip();
+    this.syncStatus();
+    toast(opened === 1 ? "Imported" : `Imported ${opened} files`);
+  }
+
+  /** File drop onto the window → import each file. Tauri hands us real paths
+      (so those buffers stay linked); a browser hands us content. */
   private setupFileDrop(): void {
-    if (!isTauri) return;
+    if (isBrowser) {
+      // Both handlers are required: without preventDefault on dragover the drop
+      // never fires, and the browser navigates away to display the file instead.
+      document.addEventListener("dragover", (e) => e.preventDefault());
+      document.addEventListener("drop", (e) => {
+        e.preventDefault();
+        const files = [...(e.dataTransfer?.files ?? [])];
+        if (files.length) void this.openFiles(files);
+      });
+      return;
+    }
     void import("@tauri-apps/api/webview").then((m) =>
       m.getCurrentWebview().onDragDropEvent((event) => {
         if (event.payload.type === "drop" && event.payload.paths.length) {
@@ -1194,9 +1363,33 @@ class App {
     );
   }
 
+  /** Save the active buffer in a browser: a download, every time. A page can't
+      write back to the file it was given, so there is no linked-file path here
+      and nothing to pin — the buffer stays exactly as it was. */
+  private downloadActive(): void {
+    const id = this.editor.active();
+    const base =
+      this.editor
+        .title(id)
+        .replace(/[/\\:*?"<>|]/g, "")
+        .replace(/…$/, "")
+        .trim()
+        .slice(0, 40) || "untitled";
+    const blob = new Blob([this.editor.activeText()], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = el("a");
+    a.href = url;
+    a.download = `${base}.${extForLang(this.editor.language())}`;
+    a.click();
+    // Revoking immediately can beat the download on some browsers; a tick is
+    // enough and the blob is small.
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    toast("Downloaded");
+  }
+
   private async exportFile(): Promise<void> {
-    if (!isTauri) {
-      toast("Saving needs the native app");
+    if (isBrowser) {
+      this.downloadActive();
       return;
     }
     const id = this.editor.active();

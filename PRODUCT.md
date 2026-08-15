@@ -121,6 +121,24 @@ Remote tab itself and Settings. The server is yours (a small self-hosted
 service), authenticated with a single shared token you paste into Settings —
 there are no accounts.
 
+### In the browser
+
+That server also hands out Buffers itself, so any device with a browser is a
+machine: open the server's address, paste the token once, and you have the same
+app — same editor, same tabs, same Remote tab — on a phone, a tablet, or a
+borrowed laptop, with nothing installed. On iOS and Android, Add to Home Screen
+makes it a standalone app.
+
+It is a **client, not a viewer**. The browser keeps its own buffers locally and
+publishes them under its own name exactly as a Mac or a PC does, so it appears
+alongside them in the Remote tab. Two browsers are two machines — your phone and
+your laptop's Chrome are separate clients, which is the point. Shortcuts follow
+the browser's host: ⌘ on a Mac, Ctrl on Windows. On a phone there are none, so
+the app stops advertising them and puts the actions in a bar under your thumb.
+
+What a browser can't do it doesn't pretend to: an imported file is copied in
+with no link back to it, and saving downloads a copy.
+
 ### Making it yours
 
 Light and dark themes (dark is Sublime's Mariana palette), a font of your

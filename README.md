@@ -14,6 +14,10 @@ Buffers are the point: text that lives in tabs, not files. Nothing is ever
 - [**macOS** (Apple silicon)](https://github.com/mtrencseni/buffers/releases/latest/download/Buffers-macos_arm64.dmg)
 - [**Windows** (x64)](https://github.com/mtrencseni/buffers/releases/latest/download/Buffers-win_x64-portable.exe)
 
+Or run nothing at all: the optional [server](server/) serves the same app as a
+web UI, so any browser — phone included — is a full client. See
+[server/README.md](server/README.md).
+
 ## Features
 
 **The buffer model**
@@ -111,7 +115,9 @@ Requires [Node](https://nodejs.org) + [pnpm](https://pnpm.io) and the
 pnpm install
 pnpm tauri dev      # the native app, with hot-reload
 pnpm dev            # browser-only UI (buffers persist to localStorage)
+pnpm dev:web        # the web build, against a running server (see server/)
 pnpm tauri build    # a distributable app bundle
+pnpm build:web      # the web build → dist-web/
 ./node_modules/.bin/tsc            # typecheck
 cd src-tauri && cargo check
 ```

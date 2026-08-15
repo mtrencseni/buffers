@@ -41,7 +41,7 @@ import {
   setSearchQuery,
 } from "@codemirror/search";
 import { invoke } from "./ipc";
-import { state } from "./state";
+import { minimapOn, state } from "./state";
 import { isLangId, LANGS } from "./langs";
 // The syntax highlight, custom selection layer, selection-whitespace, overlay
 // scrollbar and minimap live in editor-core.ts (dependency-closed, symlinked
@@ -116,9 +116,10 @@ function fontTheme(): Extension {
   });
 }
 
-/** The minimap extension for the current setting (empty = disabled). */
+/** The minimap extension for the current setting (empty = disabled); the rule
+    itself is `minimapOn()` in state.ts, shared with the Remote preview. */
 function minimapExt(): Extension {
-  return state.settings.minimap ? minimapExtension() : [];
+  return minimapOn() ? minimapExtension() : [];
 }
 
 /** Indent width and tabs-vs-spaces, for the current settings. `indentUnit` is
@@ -289,6 +290,13 @@ export class Editor {
       // vertical bar at the old position after deleting the last char on a line.
       drawSelection(),
       sublimeSelection,
+      // Mobile keyboards treat a code buffer like prose otherwise: iOS
+      // capitalizes the first word of every line and "corrects" identifiers.
+      EditorView.contentAttributes.of({
+        autocapitalize: "off",
+        autocorrect: "off",
+        spellcheck: "false",
+      }),
       indentOnInput(),
       bracketMatching(),
       this.activeLineComp.of(activeLineExt()),

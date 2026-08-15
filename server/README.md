@@ -15,10 +15,22 @@ Two kinds of host live side by side, and a read returns both the same way:
 
 Runs at `https://buffers.trencseni.com`, proxied to `127.0.0.1:8060`.
 
+It also **serves the Buffers web UI** — the same app the desktop clients are,
+built for the browser, so any phone or laptop is a client without installing
+anything. See "The web UI" below. Nothing changes for the desktop clients, and
+the UI is simply absent until `server/web/` holds a build.
+
 ## API
 
-Auth is one shared secret in `BUFFERS_TOKEN`, sent as an `X-Buffers-Token`
-header on every API endpoint. `/ping` is deliberately open.
+Auth is one shared secret in `BUFFERS_TOKEN`. There are two ways to present it,
+and every endpoint takes either:
+
+- **`X-Buffers-Token` header** — the desktop clients. A secret in a config file.
+- **A session cookie** — browsers, set by `/login` after pasting that same token
+  once. Signed, `HttpOnly` (so the page's own JavaScript can't read it back),
+  `Secure`, `SameSite=Lax`, good for a year.
+
+`/ping` is deliberately open.
 
 | Method | Path | Does |
 | --- | --- | --- |
@@ -27,6 +39,7 @@ header on every API endpoint. `/ping` is deliberately open.
 | `POST` | `/api/v1/<user>/cloud` | Add or overwrite **one** Cloud buffer. Body `{name, language, text}`. |
 | `DELETE` | `/api/v1/<user>/cloud` | Remove **one** Cloud buffer. Name from `{"name": …}` or `?name=`. |
 | `GET` | `/api/v1/<user>` | Every host and the Cloud, with all their buffers, newest first. |
+| `GET` | `/api/whoami` | Who the caller is signed in as. The web UI asks once at boot. |
 | `GET` | `/ping` | Liveness. No auth, says nothing else. |
 
 Each host in a read carries `kind`, either `"cloud"` or `"host"`, so a client
@@ -63,6 +76,46 @@ stripped client-side and never leave the machine.
 A request body is capped at 1 MB. A machine push replaces that host's previous
 state wholesale; the Cloud only ever grows by one buffer at a time and is capped
 at 8 MB total, since nothing prunes it but you.
+
+## The web UI
+
+`server/web/` holds a build of the Buffers frontend, and the server hands it out
+at `/`. That the *same* process serves the page and the API is the mechanism, not
+a convenience: a browser can only call the API without CORS, without a configured
+URL and without a token in JavaScript when the API is its own origin.
+
+A browser that opens it is a **client, not a viewer**. It gets its own session
+(IndexedDB), its own generated host name — `web-iphone-3f9a` — and it pushes
+wholesale under that name every few seconds exactly like a laptop does. Two
+browsers on one machine are two clients; renaming one leaves the old host behind,
+which the whole-host delete is there to clean up. The Cloud behaves identically
+to the desktop: push and delete one buffer at a time, never a store of its own.
+
+| Path | Does |
+| --- | --- |
+| `GET /` | The app. Redirects to `/login` without a session. |
+| `GET /login`, `POST /login` | Paste the token once; sets the session cookie. |
+| `POST /logout` | Forget this browser. |
+| `GET /assets/…`, `/fonts/…`, `/icons/…`, `/manifest.webmanifest`, … | The build's own files, from an allowlist of prefixes and names — not a blanket static mount, which would turn every non-API path into a file probe. |
+
+The static files are served unauthenticated on purpose: that is the application,
+not the data, and the login page has to load for someone with no session yet.
+
+Build and install it (needs node; corepack ships pnpm, so nothing is installed
+globally):
+
+```sh
+./build-web.sh          # pnpm build:web, then swaps dist-web/ into server/web/
+```
+
+No restart: asset names are content-hashed and `index.html` is served `no-cache`,
+so the next request picks the new build up. `server/web/` is gitignored — it is
+build output, like `.venv`.
+
+To develop the web UI against a running server, `pnpm dev:web` (port 1431)
+proxies `/api`, `/login` and `/ping` to `127.0.0.1:8060`. The server needs
+`BUFFERS_INSECURE_COOKIE=1` for that, since the dev origin is plain http and the
+session cookie is otherwise `Secure`-only. Never set it in production.
 
 ## Storage
 
