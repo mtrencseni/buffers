@@ -69,6 +69,13 @@ The status bar counts words as well as characters — Buffers exists for text
 that's about to become an email or a prompt, and words are the unit those are
 measured in.
 
+⌘U opens a stripe of characters right at the cursor — ✔ ✗ — → 😀 and whatever
+else you put there in Settings — chosen with ←/→ or by typing the number under
+the one you want. It's a stripe rather than a searchable palette because the
+list is short and you picked it yourself: the fastest thing is to see all of it
+and press one key. The system emoji picker already exists for everything else,
+and this isn't trying to replace it.
+
 ⌘⇧F searches every open buffer at once, listing each hit under its buffer with
 the line number, and Enter jumps there. It's off until you turn it on in
 Settings (see "What Buffers is not").

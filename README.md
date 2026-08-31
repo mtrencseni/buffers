@@ -47,6 +47,9 @@ web UI, so any browser — phone included — is a full client. See
 - **Search every open buffer at once** with **⌘⇧F**: hits grouped by buffer with
   line numbers, Enter jumps to one. Off until you switch it on in Settings —
   buffers are working text, not an archive.
+- **Symbols without the emoji picker** — **⌘U** opens a stripe of characters at
+  the cursor (✔ ✗ — → 😀 …); pick with ←/→ or by typing its number. The list is
+  yours to set in Settings.
 - **Indent your way**: set the width, and spaces or real tabs (four spaces by
   default).
 - A status bar that counts **words** as well as characters.
@@ -99,6 +102,7 @@ is Ctrl** (⌘T → Ctrl+T, ⌥ → Alt):
 | ⌥↑ / ⌥↓ | Move line up / down |
 | ⌥⇧↑ / ⌥⇧↓ | Duplicate line up / down |
 | ⌘] / ⌘[ | Indent / outdent |
+| ⌘U | Insert a symbol (✔ ✗ — → 😀 …) |
 | ⌥Z | Toggle line wrap |
 | ⌘+ ⌘− ⌘0 | Bigger / smaller / reset text size |
 | ⌘K | Keyboard map |

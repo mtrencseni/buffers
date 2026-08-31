@@ -23,6 +23,9 @@ export interface Settings {
   indentSize: number;
   /** Indent with real tab characters instead of spaces. */
   indentTabs: boolean;
+  /** The characters the ⌘U stripe offers, in the order they appear. Yours to
+      set — the defaults are just a starting point. */
+  symbols: string[];
   /** Show tab names in all lowercase. */
   lowercaseTabs: boolean;
   /** Tabs across the top (default) or down a resizable left sidebar. */

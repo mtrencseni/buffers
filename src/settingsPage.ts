@@ -1,5 +1,5 @@
 import type { LangId, Settings, Theme } from "./types";
-import { FONT_MAX, FONT_MIN, INDENT_MAX, INDENT_MIN, hint } from "./state";
+import { DEFAULT_SYMBOLS, FONT_MAX, FONT_MIN, INDENT_MAX, INDENT_MIN, hint } from "./state";
 import { LANGS } from "./langs";
 import { buildLangPicker } from "./langpicker";
 import { icons } from "./icons";
@@ -14,6 +14,7 @@ export interface SettingsHooks {
   onActiveLine(v: boolean): void;
   onIndentSize(n: number): void;
   onIndentTabs(v: boolean): void;
+  onSymbols(list: string[]): void;
   onSearchAllBuffers(v: boolean): void;
   onLowercaseTabs(v: boolean): void;
   onTabsSide(side: "top" | "left"): void;
@@ -198,6 +199,26 @@ export function buildSettingsPage(hooks: SettingsHooks): SettingsPage {
 
   const searchAllSw = makeSwitch(() => hooks.get().searchAllBuffers, hooks.onSearchAllBuffers);
 
+  // The ⌘U symbol list, edited as text: paste characters in, space-separated,
+  // and the order you type is the order the stripe shows (so the ones you
+  // reach for go first, where the low index keys are). Emptying it restores
+  // the defaults rather than leaving ⌘U with nothing to offer.
+  const symbolsInput = el("input", "textinput symbolinput") as HTMLInputElement;
+  symbolsInput.spellcheck = false;
+  symbolsInput.autocomplete = "off";
+  const commitSymbols = () => {
+    const list = symbolsInput.value.split(/\s+/).filter(Boolean);
+    hooks.onSymbols(list.length ? list : [...DEFAULT_SYMBOLS]);
+    sync();
+  };
+  symbolsInput.addEventListener("change", commitSymbols);
+  symbolsInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      commitSymbols();
+      symbolsInput.blur();
+    }
+  });
+
   // Default language: custom dropdown (no native selects in this design).
   const langWrap = el("div", "dropwrap");
   const langBtn = el("button", "dropbtn");
@@ -333,6 +354,24 @@ export function buildSettingsPage(hooks: SettingsHooks): SettingsPage {
     row("Highlight active line", "Shade the line the cursor is on", activeLineSw),
     row("Indent width", "Columns per indent level, and how wide a tab renders", indentStepper.el),
     row("Indent using", "What Tab inserts", indentSeg),
+    // ⌘U is the only way into the symbol stripe, so on a device with no keyboard
+    // this row would configure something you cannot invoke — same reasoning as
+    // the minimap switch above. withKey covers the other case: the binding is
+    // rebindable, and a hint built around a key the user has cleared would read
+    // as a bug rather than as an absence.
+    ...(caps.keyboard
+      ? [
+          row(
+            "Symbols",
+            withKey(
+              "insertSymbol",
+              (k) => `Offered by ${k} at the cursor, in this order — separate with spaces`,
+              "Offered at the cursor, in this order — separate with spaces"
+            ),
+            symbolsInput
+          ),
+        ]
+      : []),
     row(
       "Search across buffers",
       withKey(
@@ -416,6 +455,7 @@ export function buildSettingsPage(hooks: SettingsHooks): SettingsPage {
     setSwitch(devToolsSw, s.devTools);
     for (const [tabs, b] of indentBtns) b.classList.toggle("on", s.indentTabs === tabs);
     if (document.activeElement !== fontInput) fontInput.value = s.fontFamily;
+    if (document.activeElement !== symbolsInput) symbolsInput.value = s.symbols.join(" ");
     stepper.set(`${s.fontSize}px`);
     indentStepper.set(`${s.indentSize}`);
     langLabel.textContent = LANGS[s.defaultLanguage].label;

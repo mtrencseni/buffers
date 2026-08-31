@@ -42,6 +42,7 @@ export type CommandId =
   | "duplicateLineDown"
   | "indentMore"
   | "indentLess"
+  | "insertSymbol"
   | "toggleWrap"
   | "zoomIn"
   | "zoomOut"
@@ -114,6 +115,9 @@ export const COMMANDS: Command[] = [
   { id: "duplicateLineDown", label: "Duplicate line down", short: "Dup down", group: "Editing", defaults: ["Alt+Shift+ArrowDown"] },
   { id: "indentMore", label: "Indent", short: "Indent", group: "Editing", defaults: [`${MOD}+BracketRight`] },
   { id: "indentLess", label: "Outdent", short: "Outdent", group: "Editing", defaults: [`${MOD}+BracketLeft`] },
+  // ⌘U is CM's `undoSelection` by default; editor.ts drops that binding so this
+  // one is the only claim on the key (see historyKeys there).
+  { id: "insertSymbol", label: "Insert a symbol", short: "Symbol", group: "Editing", defaults: [`${MOD}+KeyU`] },
 
   // View
   { id: "toggleWrap", label: "Toggle line wrap", short: "Wrap", group: "View", defaults: ["Alt+KeyZ"] },

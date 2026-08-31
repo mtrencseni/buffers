@@ -14,6 +14,7 @@ import {
 import type { LangId, Theme } from "./types";
 import { Editor, type EditorCommandId } from "./editor";
 import { buildFindAll } from "./findall";
+import { buildSymbolStripe } from "./symbols";
 import { initKeyboard } from "./keyboard";
 import { COMMANDS, mergeKeybindings, type CommandId } from "./commands";
 import { isMac, isTouch } from "./platform";
@@ -132,6 +133,8 @@ class App {
   /** Last known side of the NARROW_PX breakpoint, so resize only re-lays-out
       the chrome when the window actually crosses it. */
   private wasNarrow = isNarrow();
+  /** The ⌘U symbol stripe while it's open (see symbols.ts). */
+  private symbolsEl: HTMLElement | null = null;
 
   async init(): Promise<void> {
     // The web build is served by the very server it talks to, so ask that server
@@ -248,6 +251,7 @@ class App {
         this.editor.openFind();
       },
       findInBuffers: () => this.openFindAll(),
+      insertSymbol: () => this.openSymbols(),
       // The editing commands CodeMirror used to own outright. Each returns CM's
       // own verdict, so a key that doesn't apply (outdent at column 0) falls
       // through instead of being swallowed.
@@ -341,6 +345,12 @@ class App {
       if (typeof s.indentSize === "number")
         state.settings.indentSize = clamp(Math.round(s.indentSize), INDENT_MIN, INDENT_MAX);
       if (typeof s.indentTabs === "boolean") state.settings.indentTabs = s.indentTabs;
+      // An empty list would leave ⌘U with nothing to show, so it falls back to
+      // the defaults rather than opening an empty stripe.
+      if (Array.isArray(s.symbols) && s.symbols.every((x: unknown) => typeof x === "string")) {
+        const syms = (s.symbols as string[]).filter((x) => x.length > 0);
+        if (syms.length) state.settings.symbols = syms;
+      }
       if (typeof s.searchAllBuffers === "boolean")
         state.settings.searchAllBuffers = s.searchAllBuffers;
       if (typeof s.lowercaseTabs === "boolean") state.settings.lowercaseTabs = s.lowercaseTabs;
@@ -878,6 +888,10 @@ class App {
         this.editor.applyIndent();
         persist();
       },
+      onSymbols: (list) => {
+        state.settings.symbols = list;
+        persist();
+      },
       onSearchAllBuffers: (v) => {
         state.settings.searchAllBuffers = v;
         persist();
@@ -1089,6 +1103,48 @@ class App {
     this.findAllEl?.remove();
     this.findAllEl = null;
   }
+
+  // ---- symbol stripe (⌘U) -----------------------------------------------------
+
+  private openSymbols(): void {
+    // Only meaningful over buffer text — Settings has no cursor to insert at.
+    if (this.activeSys !== null || this.symbolsEl) return;
+    const symbols = state.settings.symbols;
+    if (!symbols.length) {
+      toast("No symbols configured — add some in Settings");
+      return;
+    }
+    const stripe = buildSymbolStripe({
+      symbols,
+      at: this.editor.caretRect(),
+      onPick: (sym) => {
+        this.closeSymbols();
+        this.editor.insertAtCursor(sym);
+      },
+      onClose: () => {
+        this.closeSymbols();
+        this.editor.view.focus();
+      },
+    });
+    document.body.append(stripe.el);
+    this.symbolsEl = stripe.el;
+    // Clicking anywhere else dismisses, like the language picker.
+    document.addEventListener("mousedown", this.onSymbolsOutside, true);
+    stripe.focus();
+  }
+
+  private closeSymbols(): void {
+    document.removeEventListener("mousedown", this.onSymbolsOutside, true);
+    this.symbolsEl?.remove();
+    this.symbolsEl = null;
+  }
+
+  private onSymbolsOutside = (e: MouseEvent) => {
+    if (this.symbolsEl && !this.symbolsEl.contains(e.target as Node)) {
+      this.closeSymbols();
+      this.editor.view.focus();
+    }
+  };
 
   private rebuildComboMap(): void {
     const m = new Map<string, CommandId>();

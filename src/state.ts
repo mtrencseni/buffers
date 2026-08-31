@@ -10,6 +10,25 @@ export const SIDEBAR_MAX = 420;
 export const INDENT_MIN = 1;
 export const INDENT_MAX = 8;
 
+/** What the ⌘U stripe offers out of the box: the marks and arrows that come up
+    in prose and commit messages, and a small run of faces. Everything here is a
+    character you can't type but might want mid-sentence — which is the whole
+    test for whether something belongs in this list. */
+export const DEFAULT_SYMBOLS = [
+  "✔",
+  "✗",
+  "—",
+  "←",
+  "→",
+  "⟶",
+  "⟵",
+  "😀",
+  "😁",
+  "😂",
+  "😐",
+  "😢",
+];
+
 export const state = {
   settings: {
     theme: "system",
@@ -22,6 +41,7 @@ export const state = {
     activeLine: false,
     indentSize: 4,
     indentTabs: false,
+    symbols: [...DEFAULT_SYMBOLS],
     lowercaseTabs: false,
     tabsSide: "top",
     sidebarWidth: 200,

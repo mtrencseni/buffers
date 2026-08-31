@@ -29,6 +29,7 @@ import {
   moveLineDown,
   moveLineUp,
   toggleComment,
+  undoSelection,
 } from "@codemirror/commands";
 import { bracketMatching, indentOnInput, indentUnit, syntaxHighlighting } from "@codemirror/language";
 import {
@@ -180,6 +181,14 @@ const OWNED_BY_REGISTRY: unknown[] = [
     in searchKeymap, which Buffers doesn't install.) */
 const baseKeymap = defaultKeymap.filter((b) => !OWNED_BY_REGISTRY.includes(b.run));
 
+/** historyKeymap minus its Mod-u binding. CM spends ⌘U on `undoSelection` —
+    undoing a selection change without touching the text, an Emacs-ism almost
+    nobody reaches for — and Buffers wants that key for the symbol stripe. It
+    has to come out here, not just be rebound: CM's keymap runs on the content
+    DOM and the global handler runs on window, so leaving it would fire both.
+    ⌘⇧U still redoes a selection. */
+const historyKeys = historyKeymap.filter((b) => b.run !== undoSelection);
+
 /** Words in a document: runs of non-whitespace, which is the count people mean
     when they're drafting prose. Walks the Text in chunks so a large buffer never
     has to be materialized as a single string. */
@@ -315,7 +324,7 @@ export class Editor {
       // the editor scope for when focus is back in the text.
       keymap.of([{ key: "Escape", run: closeSearchPanel, scope: "editor search-panel" }]),
       syntaxHighlighting(highlight),
-      keymap.of([...baseKeymap, ...historyKeymap, indentWithTab]),
+      keymap.of([...baseKeymap, ...historyKeys, indentWithTab]),
       this.langComp.of(syntax ?? []),
       this.wrapComp.of(state.settings.wrapLines ? EditorView.lineWrapping : []),
       this.indentComp.of(indentExt()),
@@ -607,6 +616,25 @@ export class Editor {
 
   openFind(): void {
     openSearchPanel(this.view);
+  }
+
+  /** Type `text` at the cursor, replacing the selection — what the ⌘U stripe
+      does on pick. Goes through a normal transaction, so it lands in the undo
+      history like anything the user typed. */
+  insertAtCursor(text: string): void {
+    this.view.dispatch(
+      this.view.state.replaceSelection(text),
+      { scrollIntoView: true, userEvent: "input.type" }
+    );
+    this.view.focus();
+  }
+
+  /** Where the caret is on screen, for positioning a popup against it. Null
+      when CM can't say — the cursor scrolled out of the viewport, or the view
+      hasn't been measured yet. */
+  caretRect(): { left: number; top: number; bottom: number } | null {
+    const c = this.view.coordsAtPos(this.view.state.selection.main.head);
+    return c ? { left: c.left, top: c.top, bottom: c.bottom } : null;
   }
 
   /** Run one of the CodeMirror editing commands the registry owns (see
