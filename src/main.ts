@@ -353,6 +353,8 @@ class App {
       }
       if (typeof s.searchAllBuffers === "boolean")
         state.settings.searchAllBuffers = s.searchAllBuffers;
+      if (typeof s.selectAllIncludesTitle === "boolean")
+        state.settings.selectAllIncludesTitle = s.selectAllIncludesTitle;
       if (typeof s.lowercaseTabs === "boolean") state.settings.lowercaseTabs = s.lowercaseTabs;
       if (s.tabsSide === "left" || s.tabsSide === "top") state.settings.tabsSide = s.tabsSide;
       if (typeof s.sidebarWidth === "number")
@@ -886,6 +888,10 @@ class App {
       onIndentTabs: (v) => {
         state.settings.indentTabs = v;
         this.editor.applyIndent();
+        persist();
+      },
+      onSelectAllIncludesTitle: (v) => {
+        state.settings.selectAllIncludesTitle = v;
         persist();
       },
       onSymbols: (list) => {

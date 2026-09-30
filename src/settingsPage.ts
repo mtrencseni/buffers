@@ -1,6 +1,8 @@
 import type { LangId, Settings, Theme } from "./types";
 import { DEFAULT_SYMBOLS, FONT_MAX, FONT_MIN, INDENT_MAX, INDENT_MIN, hint } from "./state";
 import { LANGS } from "./langs";
+import { comboLabel } from "./commands";
+import { MOD } from "./platform";
 import { buildLangPicker } from "./langpicker";
 import { icons } from "./icons";
 
@@ -15,6 +17,7 @@ export interface SettingsHooks {
   onIndentSize(n: number): void;
   onIndentTabs(v: boolean): void;
   onSymbols(list: string[]): void;
+  onSelectAllIncludesTitle(v: boolean): void;
   onSearchAllBuffers(v: boolean): void;
   onLowercaseTabs(v: boolean): void;
   onTabsSide(side: "top" | "left"): void;
@@ -198,6 +201,10 @@ export function buildSettingsPage(hooks: SettingsHooks): SettingsPage {
   }
 
   const searchAllSw = makeSwitch(() => hooks.get().searchAllBuffers, hooks.onSearchAllBuffers);
+  const selectTitleSw = makeSwitch(
+    () => hooks.get().selectAllIncludesTitle,
+    hooks.onSelectAllIncludesTitle
+  );
 
   // The ⌘U symbol list, edited as text: paste characters in, space-separated,
   // and the order you type is the order the stripe shows (so the ones you
@@ -372,6 +379,20 @@ export function buildSettingsPage(hooks: SettingsHooks): SettingsPage {
           ),
         ]
       : []),
+    // ⌘A is a native-edit key, not a registry command, so there's no hint(id) to
+    // ask — comboLabel keeps it platform-correct (Ctrl+A on Windows). Hidden on
+    // touch for the same reason as Symbols: the OS's own Select All there never
+    // comes through this code, so the switch would change nothing.
+    ...(caps.keyboard
+      ? [
+          row(
+            "Select title on Select All",
+            `When off, ${comboLabel(`${MOD}+KeyA`)} in a plain-text or Markdown buffer that ` +
+              "opens with a title (underlined, or starting with #) selects only what's below it — press it again to take the title too",
+            selectTitleSw
+          ),
+        ]
+      : []),
     row(
       "Search across buffers",
       withKey(
@@ -451,6 +472,7 @@ export function buildSettingsPage(hooks: SettingsHooks): SettingsPage {
     setSwitch(minimapSw, s.minimap);
     setSwitch(activeLineSw, s.activeLine);
     setSwitch(searchAllSw, s.searchAllBuffers);
+    setSwitch(selectTitleSw, s.selectAllIncludesTitle);
     setSwitch(lowerSw, s.lowercaseTabs);
     setSwitch(devToolsSw, s.devTools);
     for (const [tabs, b] of indentBtns) b.classList.toggle("on", s.indentTabs === tabs);

@@ -23,6 +23,11 @@ export interface Settings {
   indentSize: number;
   /** Indent with real tab characters instead of spaces. */
   indentTabs: boolean;
+  /** Whether ⌘A takes a buffer's title along with the rest. When false, and
+      the buffer opens with a Markdown title (see titleBodyStart in editor.ts),
+      Select All starts below it — so the body can be copied out without the
+      label that only exists to name the tab. */
+  selectAllIncludesTitle: boolean;
   /** The characters the ⌘U stripe offers, in the order they appear. Yours to
       set — the defaults are just a starting point. */
   symbols: string[];

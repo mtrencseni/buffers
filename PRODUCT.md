@@ -76,6 +76,16 @@ list is short and you picked it yourself: the fastest thing is to see all of it
 and press one key. The system emoji picker already exists for everything else,
 and this isn't trying to replace it.
 
+A buffer's first line often exists only to name its tab — "Release email —
+draft" — while what gets pasted into the email is everything below it. Turn
+off *Select title on Select All* and ⌘A leaves that title out; a second ⌘A
+takes it too, so everything is always one more keystroke away. A title has to be
+declared as a Markdown heading (underlined with `---` / `===`, or starting with
+`#`); anything looser would misfire on the text this app mostly holds, where
+"Hi Sam," on its own line looks exactly like a title and must still be copied.
+It applies to plain-text and Markdown buffers only, since in code the first line
+is code, and `#` is a comment in half the languages.
+
 ⌘⇧F searches every open buffer at once, listing each hit under its buffer with
 the line number, and Enter jumps there. It's off until you turn it on in
 Settings (see "What Buffers is not").

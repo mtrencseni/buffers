@@ -50,6 +50,11 @@ web UI, so any browser — phone included — is a full client. See
 - **Symbols without the emoji picker** — **⌘U** opens a stripe of characters at
   the cursor (✔ ✗ — → 😀 …); pick with ←/→ or by typing its number. The list is
   yours to set in Settings.
+- **Copy the body, not the label.** Turn off *Select title on Select All* and
+  **⌘A** in a buffer that opens with a Markdown title — underlined with `---`,
+  or starting with `#` — selects only what's below it; press it again to take
+  the title too. A title has to be
+  declared that way, so an email's "Hi Sam," is never mistaken for one.
 - **Indent your way**: set the width, and spaces or real tabs (four spaces by
   default).
 - A status bar that counts **words** as well as characters.

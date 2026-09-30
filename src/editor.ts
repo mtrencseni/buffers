@@ -28,6 +28,7 @@ import {
   indentWithTab,
   moveLineDown,
   moveLineUp,
+  selectAll,
   toggleComment,
   undoSelection,
 } from "@codemirror/commands";
@@ -179,7 +180,47 @@ const OWNED_BY_REGISTRY: unknown[] = [
     CM would keep answering the hardcoded key after a rebind — the old key would
     still work and the new one would fire twice. (gotoLine isn't listed: it ships
     in searchKeymap, which Buffers doesn't install.) */
-const baseKeymap = defaultKeymap.filter((b) => !OWNED_BY_REGISTRY.includes(b.run));
+const baseKeymap = defaultKeymap.filter(
+  // selectAll is REPLACED rather than owned: ⌘A stays a native-edit key, but
+  // runs Editor.selectAllCmd, which may leave the title out (see below).
+  (b) => !OWNED_BY_REGISTRY.includes(b.run) && b.run !== selectAll
+);
+
+/** The languages in which a buffer can have a title. In a code buffer the first
+    line is code — and `# ` is a comment in Python, shell, Ruby, YAML, TOML and
+    more — so Select All there always means all of it. */
+const TITLED_LANGS = new Set<LangId>(["plain", "markdown"]);
+
+/** A setext underline: a line of only `-` or only `=`, three or more. */
+const UNDERLINE = /^ {0,3}(-{3,}|={3,})[ \t]*$/;
+/** An ATX heading: one to six `#`, then whitespace, then something. */
+const ATX = /^ {0,3}#{1,6}[ \t]+\S/;
+
+/** Where the body starts, if the document opens with a title — else null.
+
+    A title has to be DECLARED, as a Markdown heading: a line underlined with
+    `---` / `===`, or a line starting `# `. Anything looser would be wrong in the
+    way that costs most, because this app's text is mostly email: "Hi Sam," on a
+    line of its own, then a blank, looks exactly like a title and absolutely is
+    not one, and a ⌘A that silently dropped the greeting would ship broken mail.
+
+    The title block is the heading line, its underline if it has one (an ATX
+    heading may carry a decorative rule too), and the blank lines after it.
+    Leading blank lines before the heading are skipped. A document that is ONLY
+    a title returns null — ⌘A must never select nothing. */
+export function titleBodyStart(doc: Text): number | null {
+  const blank = (n: number) => doc.line(n).text.trim() === "";
+  let n = 1;
+  while (n <= doc.lines && blank(n)) n++;
+  if (n > doc.lines) return null;
+  const underlined = n < doc.lines && UNDERLINE.test(doc.line(n + 1).text);
+  if (!underlined && !ATX.test(doc.line(n).text)) return null;
+  let body = underlined ? n + 2 : n + 1;
+  // "# Title" followed by a rule: the rule is part of the title, not the body.
+  if (!underlined && body <= doc.lines && UNDERLINE.test(doc.line(body).text)) body++;
+  while (body <= doc.lines && blank(body)) body++;
+  return body <= doc.lines ? doc.line(body).from : null;
+}
 
 /** historyKeymap minus its Mod-u binding. CM spends ⌘U on `undoSelection` —
     undoing a selection change without touching the text, an Emacs-ism almost
@@ -324,7 +365,12 @@ export class Editor {
       // the editor scope for when focus is back in the text.
       keymap.of([{ key: "Escape", run: closeSearchPanel, scope: "editor search-panel" }]),
       syntaxHighlighting(highlight),
-      keymap.of([...baseKeymap, ...historyKeys, indentWithTab]),
+      keymap.of([
+        ...baseKeymap,
+        ...historyKeys,
+        indentWithTab,
+        { key: "Mod-a", run: (v) => this.selectAllCmd(v) },
+      ]),
       this.langComp.of(syntax ?? []),
       this.wrapComp.of(state.settings.wrapLines ? EditorView.lineWrapping : []),
       this.indentComp.of(indentExt()),
@@ -616,6 +662,26 @@ export class Editor {
 
   openFind(): void {
     openSearchPanel(this.view);
+  }
+
+  /** ⌘A. Everything, unless "Select title on Select All" is off and this is a
+      prose buffer that opens with a title — then everything below the title.
+      Reads the setting and the language at press time, so neither needs a
+      compartment. */
+  private selectAllCmd(view: EditorView): boolean {
+    const doc = view.state.doc;
+    const skipTitle =
+      !state.settings.selectAllIncludesTitle && TITLED_LANGS.has(this.language());
+    const bodyFrom = skipTitle ? titleBodyStart(doc) ?? 0 : 0;
+    // A second ⌘A takes the title too. Stateless on purpose — no timer, no
+    // "last command" flag: if the body is already exactly what's selected (or
+    // everything is), this press is asking for more, so select everything.
+    // Once everything is selected it stays that way rather than toggling back.
+    const cur = view.state.selection.main;
+    const again = cur.to === doc.length && (cur.from === bodyFrom || cur.from === 0);
+    const from = again ? 0 : bodyFrom;
+    view.dispatch({ selection: { anchor: from, head: doc.length }, userEvent: "select" });
+    return true;
   }
 
   /** Type `text` at the cursor, replacing the selection — what the ⌘U stripe

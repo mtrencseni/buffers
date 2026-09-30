@@ -42,6 +42,7 @@ export const state = {
     indentSize: 4,
     indentTabs: false,
     symbols: [...DEFAULT_SYMBOLS],
+    selectAllIncludesTitle: true,
     lowercaseTabs: false,
     tabsSide: "top",
     sidebarWidth: 200,

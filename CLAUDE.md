@@ -183,6 +183,25 @@ same source is also the shipped web client. `isTauri` gates native-only calls;
 - **Keybindings:** every shortcut is a `Command` in `commands.ts`; `main.ts` builds a combo→id map and dispatches. To add one: extend `CommandId` + `COMMANDS`, add a handler in `main.ts`'s `commandHandlers` (and a `menu.rs` item if it belongs in the menu).
 - **The registry owns the editing keys, not CodeMirror.** Toggle comment, delete/move/duplicate line and indent/outdent used to live only in CM's `defaultKeymap`: they worked, but were absent from the Shortcuts tab and the ⌘K map, and could not be rebound. They're now `EDITOR_COMMANDS` in editor.ts, dispatched through `Editor.run()`, and editor.ts **filters them out of `defaultKeymap` by function identity** (`OWNED_BY_REGISTRY`). Keep both halves in step: leave a command in the stock keymap and CM keeps answering the hardcoded key after a rebind — the old key still works and the new one fires twice. The regression test is one line: unbind the combo and press it; nothing should happen.
 - **`mergeKeybindings` protects the user's choices from new defaults.** A saved config holds the FULL binding set, so a command added later isn't in it and arrives on its default combo — which the user may already have assigned elsewhere. The merge drops a *new* command's default when a *saved* binding already claims it, so the new command comes up unbound (assignable in the Shortcuts tab) instead of silently colliding, where whichever the combo map built last would win.
+- **⌘A is replaced, not owned.** It stays a native-edit key (keyboard.ts passes
+  it through to CM, and it isn't in `COMMANDS`), but editor.ts filters CM's
+  `selectAll` out of `baseKeymap` and binds `Mod-a` to `Editor.selectAllCmd`,
+  which starts the selection at `titleBodyStart(doc)` when the "Select title on
+  Select All" setting is off. Title detection is deliberately strict — only a
+  declared Markdown heading (setext `---`/`===` underline of 3+, or ATX `# `)
+  counts, only in plain/Markdown buffers, and a title-only doc selects
+  everything so ⌘A is never a no-op. A **second ⌘A selects everything**, and
+  it's stateless: no timer or last-command flag, just "is the body (or all of
+  it) already exactly what's selected?" — so moving the cursor naturally resets
+  it, and a third press stays on everything rather than toggling back. The loose alternative ("first line, then a
+  blank") would eat the greeting off every email. 18 cases, including the
+  must-not-match ones, were checked through a real ⌘A keydown.
+  **Untested gap:** the macOS menu bar's Edit → Select All and the right-click
+  menu's Select All send AppKit's native `selectAll:`, which never passes through
+  CM's keymap — so those two should still select everything. The keyboard
+  shortcut reaches CM first because WKWebView gives page JS first refusal on key
+  equivalents (the same reason ⌘Z reaches CM's history). Unverified in the
+  native app.
 - **⌘U had to be taken off CodeMirror.** CM's `historyKeymap` spends `Mod-u` on `undoSelection`. Rebinding alone wouldn't have been enough: CM's keymap runs on the content DOM and Buffers' handler runs on `window`, so the key would have fired *both*. editor.ts filters that one binding out (`historyKeys`), the same trick as `baseKeymap`. ⌘⇧U still redoes a selection.
 - **Short labels have to fit a 45px key cap.** `Command.short` is what the ⌘K map draws; the cell wraps at spaces but breaks mid-word ("Comme/nt") for a single word that's too wide. Width, not character count, is the constraint — "Settings" fits and "Comment" doesn't, because of the double m. Check a new `short` on the map before assuming it fits.
 - **Live settings:** language / wrap / minimap are CM **compartments** reconfigured across every buffer state when the setting changes (`applyWrap`, `applyMinimap`, `setLanguage`); font family/size are CSS vars (`--ed-font`, `--ed-size`).
